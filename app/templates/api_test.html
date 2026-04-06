@@ -1,0 +1,96 @@
+{% extends "layout.html" %}
+
+{% block title %}API Test | AI Server{% endblock %}
+{% block page_title %}API Test{% endblock %}
+
+{% block content %}
+
+<div class="section">
+
+  <div class="card">
+    <h3>Request</h3>
+
+    <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+      <select id="method" class="token-box" style="width:120px;">
+        <option>GET</option>
+        <option>POST</option>
+        <option>PUT</option>
+        <option>DELETE</option>
+      </select>
+
+      <input
+        id="endpoint"
+        class="token-box"
+        style="flex:1;min-width:220px;"
+        value="/api/v1/system/me"
+      />
+    </div>
+
+    <textarea
+      id="payload"
+      class="token-box"
+      rows="4"
+      placeholder='JSON body (POST/PUT)'
+    ></textarea>
+
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" onclick="sendRequest()">
+        Send Request
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<div class="section">
+
+  <div class="card">
+    <h3>Response</h3>
+
+    <textarea
+      id="response"
+      class="token-box"
+      rows="10"
+      readonly
+      placeholder="Response sẽ hiển thị tại đây"
+    ></textarea>
+  </div>
+
+</div>
+
+<script>
+async function sendRequest() {
+  const method = document.getElementById("method").value;
+  const endpoint = document.getElementById("endpoint").value;
+  const payload = document.getElementById("payload").value;
+  const output = document.getElementById("response");
+
+  output.value = "Loading...";
+
+  try {
+    const res = await fetch(endpoint, {
+      method,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: ["GET","DELETE"].includes(method)
+        ? null
+        : payload || "{}",
+      credentials: "include" // 🔐 COOKIE JWT
+    });
+
+    const text = await res.text();
+
+    try {
+      output.value = JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      output.value = text;
+    }
+
+  } catch (err) {
+    output.value = "ERROR: " + err;
+  }
+}
+</script>
+
+{% endblock %}

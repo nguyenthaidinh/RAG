@@ -1,0 +1,134 @@
+{% extends "layout.html" %}
+
+{% block title %}Documents | AI Server{% endblock %}
+{% block page_title %}{{ t('documents') if t else 'Documents' }}{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     SEARCH & FILTER
+     ========================= -->
+<div class="section">
+  <form method="get" action="/dashboard/documents" class="flex flex-between" style="gap: 12px; flex-wrap: wrap;">
+    <input
+      type="text"
+      name="q"
+      placeholder="Search title, external ID, source..."
+      value="{{ q }}"
+      class="token-box"
+      style="flex: 1; min-width: 200px;"
+    />
+
+    <select name="status" class="token-box" style="width: 140px;">
+      <option value="" {% if not filter_status %}selected{% endif %}>All Status</option>
+      <option value="uploaded" {% if filter_status == "uploaded" %}selected{% endif %}>Uploaded</option>
+      <option value="chunked" {% if filter_status == "chunked" %}selected{% endif %}>Chunked</option>
+      <option value="indexed" {% if filter_status == "indexed" %}selected{% endif %}>Indexed</option>
+      <option value="ready" {% if filter_status == "ready" %}selected{% endif %}>Ready</option>
+      <option value="error" {% if filter_status == "error" %}selected{% endif %}>Error</option>
+    </select>
+
+    <select name="representation_type" class="token-box" style="width: 150px;">
+      <option value="" {% if not filter_repr %}selected{% endif %}>All Types</option>
+      <option value="original" {% if filter_repr == "original" %}selected{% endif %}>Original</option>
+      <option value="synthesized" {% if filter_repr == "synthesized" %}selected{% endif %}>Synthesized</option>
+    </select>
+
+    <select name="source" class="token-box" style="width: 130px;">
+      <option value="" {% if not filter_source %}selected{% endif %}>All Sources</option>
+      {% for s in sources %}
+      <option value="{{ s }}" {% if filter_source == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+
+    {% if is_system_admin %}
+    <input
+      type="text"
+      name="tenant_id"
+      placeholder="Tenant ID"
+      value="{{ filter_tenant }}"
+      class="token-box"
+      style="width: 130px;"
+    />
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">Search</button>
+    <a href="/dashboard/documents" class="btn">Reset</a>
+  </form>
+</div>
+
+<!-- =========================
+     DOCUMENTS TABLE
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>Documents ({{ total }})</h2>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Title</th>
+          <th>Tenant</th>
+          <th>Source</th>
+          <th>Status</th>
+          <th>Type</th>
+          <th>Updated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in documents %}
+        <tr>
+          <td>{{ doc.id }}</td>
+          <td>
+            <strong>{{ (doc.title or doc.external_id)[:50] }}</strong>
+            {% if doc.title and doc.title|length > 50 %}...{% endif %}
+          </td>
+          <td style="font-size: 11px; color: var(--muted2);">{{ doc.tenant_id[:8] }}...</td>
+          <td><span class="badge badge-muted">{{ doc.source }}</span></td>
+          <td>
+            <span class="badge {% if doc.status == 'ready' %}badge-success{% elif doc.status == 'error' %}badge-danger{% elif doc.status == 'uploaded' %}badge-warning{% else %}badge-muted{% endif %}">
+              {{ doc.status }}
+            </span>
+          </td>
+          <td>
+            <span class="badge {% if doc.representation_type == 'synthesized' %}badge-primary{% else %}badge-muted{% endif %}">
+              {{ doc.representation_type }}
+            </span>
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">{{ doc.updated_at.strftime('%Y-%m-%d %H:%M') if doc.updated_at else '-' }}</td>
+          <td>
+            <a href="/dashboard/documents/{{ doc.id }}{% if filter_tenant %}?tenant_id={{ filter_tenant }}{% endif %}" class="btn" style="padding: 6px 10px; font-size: 12px;">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 24px; color: var(--muted);">
+            No documents found
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if total > page_size %}
+  <div class="flex flex-between mt-2" style="color: var(--muted); font-size: 12px;">
+    <span>Page {{ page }} of {{ total_pages }}</span>
+    <div style="gap: 8px; display: flex;">
+      {% if page > 1 %}
+      <a href="/dashboard/documents?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if filter_status %}&status={{ filter_status }}{% endif %}{% if filter_repr %}&representation_type={{ filter_repr }}{% endif %}{% if filter_source %}&source={{ filter_source }}{% endif %}{% if filter_tenant %}&tenant_id={{ filter_tenant }}{% endif %}" class="btn" style="padding: 6px 10px;">Previous</a>
+      {% endif %}
+      {% if page < total_pages %}
+      <a href="/dashboard/documents?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if filter_status %}&status={{ filter_status }}{% endif %}{% if filter_repr %}&representation_type={{ filter_repr }}{% endif %}{% if filter_source %}&source={{ filter_source }}{% endif %}{% if filter_tenant %}&tenant_id={{ filter_tenant }}{% endif %}" class="btn" style="padding: 6px 10px;">Next</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

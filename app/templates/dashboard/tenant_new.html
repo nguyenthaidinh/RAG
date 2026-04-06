@@ -1,0 +1,141 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ t('new_tenant') }} | AI Server{% endblock %}
+{% block page_title %}{{ t('create_tenant') }}{% endblock %}
+
+{% block content %}
+
+<div class="breadcrumb">
+  <a href="/dashboard">{{ t('dashboard') }}</a>
+  <span class="sep">/</span>
+  <a href="/dashboard/tenants">{{ t('tenants') }}</a>
+  <span class="sep">/</span>
+  <span>{{ t('create') }}</span>
+</div>
+
+{% if error %}
+<div class="alert alert-error">
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+  {{ error }}
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="card" style="max-width: 640px;">
+    <form method="post" action="/dashboard/tenants/new" autocomplete="off">
+      <input type="hidden" name="csrf_token" id="csrf_token" value="" />
+
+      <div class="form-group">
+        <label for="tenant_id">{{ t('tenant_id') }}</label>
+        <input
+          id="tenant_id"
+          type="text"
+          name="tenant_id"
+          placeholder="e.g. acme-corp, company-123"
+          value="{{ form_data.tenant_id if form_data else '' }}"
+          required
+          autofocus
+          pattern="[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]"
+        />
+        <div class="form-help">{{ t('tenant_id_help') }}</div>
+      </div>
+
+      <div class="form-group">
+        <label for="name">{{ t('tenant_name') }}</label>
+        <input
+          id="name"
+          type="text"
+          name="name"
+          placeholder="e.g. ACME Corporation"
+          value="{{ form_data.name if form_data else '' }}"
+          required
+          maxlength="255"
+        />
+        <div class="form-help">{{ t('tenant_name_help') }}</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="max_users">{{ t('max_users') }}</label>
+          <input
+            id="max_users"
+            type="number"
+            name="max_users"
+            value="{{ form_data.max_users if form_data else '10' }}"
+            min="1"
+            max="10000"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="max_requests">{{ t('max_requests') }}</label>
+          <input
+            id="max_requests"
+            type="number"
+            name="max_requests"
+            value="{{ form_data.max_requests if form_data else '10000' }}"
+            min="100"
+          />
+          <div class="form-help">{{ t('monthly_request_quota') }}</div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="max_tokens">{{ t('max_tokens') }}</label>
+          <input
+            id="max_tokens"
+            type="number"
+            name="max_tokens"
+            value="{{ form_data.max_tokens if form_data else '10000000' }}"
+            min="1000"
+          />
+          <div class="form-help">{{ t('monthly_token_quota') }}</div>
+        </div>
+
+        <div class="form-group">
+          <label for="max_storage_mb">{{ t('max_storage') }}</label>
+          <input
+            id="max_storage_mb"
+            type="number"
+            name="max_storage_mb"
+            value="{{ form_data.max_storage_mb if form_data else '1024' }}"
+            min="10"
+          />
+          <div class="form-help">{{ t('doc_storage_limit') }}</div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; margin-top: 8px;">
+        <button type="submit" class="btn btn-primary" id="createBtn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          {{ t('create_tenant') }}
+        </button>
+        <a href="/dashboard/tenants" class="btn">{{ t('cancel') }}</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Populate CSRF token from cookie
+(function() {
+  var cookies = document.cookie.split(';');
+  for (var i = 0; i < cookies.length; i++) {
+    var c = cookies[i].trim();
+    if (c.startsWith('csrf_token=')) {
+      document.getElementById('csrf_token').value = c.substring('csrf_token='.length);
+      break;
+    }
+  }
+})();
+
+// Prevent double-submit
+document.querySelector('form').addEventListener('submit', function() {
+  var btn = document.getElementById('createBtn');
+  btn.disabled = true;
+  btn.textContent = '{{ t("creating") }}';
+});
+</script>
+
+{% endblock %}

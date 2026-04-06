@@ -1,0 +1,107 @@
+{
+  "_comment": "Sample source config and payload contract for AI Server Source Platform. This file is documentation — not loaded by code.",
+
+  "create_source_request": {
+    "_description": "POST /api/v1/admin/source-platform/sources",
+    "source_key": "company-policies",
+    "name": "Company Policy Knowledge Base",
+    "description": "Internal policies, guidelines, and process documents",
+    "connector_type": "internal-api",
+    "base_url": "https://your-internal-api.example.com",
+    "auth_type": "bearer",
+    "auth_config": {
+      "token": "your-api-token-here"
+    },
+    "list_path": "/api/internal/knowledge/items",
+    "detail_path_template": "/api/internal/knowledge/items/{external_id}",
+    "request_config": null,
+    "mapping_config": null,
+    "default_metadata": {
+      "kind": "policy",
+      "status": "published"
+    },
+    "is_active": true
+  },
+
+  "expected_upstream_list_response": {
+    "_description": "What the upstream API should return at list_path. Connector looks for 'data', 'items', or 'results' envelope.",
+    "data": [
+      {
+        "id": "pol-001",
+        "title": "Remote Work Policy",
+        "status": "published",
+        "kind": "policy",
+        "updated_at": "2026-03-15T10:00:00Z"
+      },
+      {
+        "id": "pol-002",
+        "title": "Expense Reimbursement Guidelines",
+        "status": "published",
+        "kind": "policy",
+        "updated_at": "2026-03-10T08:30:00Z"
+      }
+    ]
+  },
+
+  "expected_upstream_detail_response": {
+    "_description": "What the upstream API should return at detail_path_template/{external_id}. Connector probes common field names.",
+    "data": {
+      "id": "pol-001",
+      "title": "Remote Work Policy",
+      "body": "## Remote Work Policy\n\nEmployees may work remotely up to 3 days per week...",
+      "summary": "Guidelines for remote work arrangements",
+      "status": "published",
+      "kind": "policy",
+      "category": "human-resources",
+      "tags": ["remote", "work-from-home", "hr"],
+      "author": "HR Department",
+      "url": "https://intranet.example.com/policies/remote-work",
+      "updated_at": "2026-03-15T10:00:00Z",
+      "access_scope": {
+        "visibility": "tenant"
+      }
+    }
+  },
+
+  "expected_document_metadata_after_sync": {
+    "_description": "Metadata shape on the document stored in AI Server after sync. Top-level fields come from connector._extract_metadata(). source_platform block is provenance.",
+    "kind": "policy",
+    "category": "human-resources",
+    "tags": ["remote", "work-from-home", "hr"],
+    "author": "HR Department",
+    "status": "published",
+    "updated_at": "2026-03-15T10:00:00Z",
+    "source_uri": "https://intranet.example.com/policies/remote-work",
+    "source_platform": {
+      "source_key": "company-policies",
+      "source_type": "internal_api",
+      "source_uri": "https://intranet.example.com/policies/remote-work",
+      "access_scope": {
+        "visibility": "tenant"
+      },
+      "kind": "policy",
+      "synced_at": "2026-03-20T01:30:00+00:00",
+      "ingest_mode": "source_platform",
+      "updated_at": "2026-03-15T10:00:00",
+      "checksum": "a1b2c3d4e5f6..."
+    }
+  },
+
+  "second_source_example": {
+    "_description": "Example of how to onboard a second source — just another config, no new code needed.",
+    "source_key": "support-faq",
+    "name": "Customer Support FAQ",
+    "connector_type": "internal-api",
+    "base_url": "https://your-support-api.example.com",
+    "auth_type": "bearer",
+    "auth_config": {
+      "token": "different-token"
+    },
+    "list_path": "/api/v1/faqs",
+    "detail_path_template": "/api/v1/faqs/{external_id}",
+    "default_metadata": {
+      "kind": "faq",
+      "status": "active"
+    }
+  }
+}

@@ -1,0 +1,103 @@
+{% extends "layout.html" %}
+
+{% block title %}Users | AI Server{% endblock %}
+{% block page_title %}Users Management{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/users.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     SEARCH & FILTER
+     ========================= -->
+<div class="section">
+  <form method="get" action="/dashboard/users" class="flex flex-between" style="gap: 12px; flex-wrap: wrap;">
+    <input
+      type="text"
+      name="q"
+      placeholder="Search email..."
+      value="{{ q }}"
+      class="token-box"
+      style="flex: 1; min-width: 200px;"
+    />
+
+    <select name="status" class="token-box" style="width: 150px;">
+      <option value="all" {% if status == "all" %}selected{% endif %}>All Status</option>
+      <option value="active" {% if status == "active" %}selected{% endif %}>Active</option>
+      <option value="inactive" {% if status == "inactive" %}selected{% endif %}>Inactive</option>
+    </select>
+
+    <button type="submit" class="btn btn-primary">Search</button>
+    <a href="/dashboard/users" class="btn">Reset</a>
+  </form>
+</div>
+
+<!-- =========================
+     USERS TABLE
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>Users ({{ total }})</h2>
+    <a href="/dashboard/users/new" class="btn btn-primary">+ New User</a>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Tenant ID</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.id }}</td>
+          <td><strong>{{ u.email }}</strong></td>
+          <td><span class="badge badge-muted">{{ u.role | upper }}</span></td>
+          <td style="font-size: 11px; color: var(--muted2);">{{ u.tenant_id[:8] }}...</td>
+          <td>
+            <span class="badge {% if u.is_active %}badge-success{% else %}badge-danger{% endif %}">
+              {{ "Active" if u.is_active else "Inactive" }}
+            </span>
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <a href="/dashboard/users/{{ u.id }}" class="btn" style="padding: 6px 10px; font-size: 12px;">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" style="text-align: center; padding: 24px; color: var(--muted);">
+            No users found
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if total > 50 %}
+  <div class="flex flex-between mt-2" style="color: var(--muted); font-size: 12px;">
+    <span>Page {{ page }} of {{ (total + 49) // 50 }}</span>
+    <div style="gap: 8px; display: flex;">
+      {% if page > 1 %}
+      <a href="/dashboard/users?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if status != 'all' %}&status={{ status }}{% endif %}" class="btn" style="padding: 6px 10px;">Previous</a>
+      {% endif %}
+      {% if page * 50 < total %}
+      <a href="/dashboard/users?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if status != 'all' %}&status={{ status }}{% endif %}" class="btn" style="padding: 6px 10px;">Next</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

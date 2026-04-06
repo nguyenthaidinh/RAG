@@ -1,0 +1,155 @@
+{% extends "layout.html" %}
+
+{% block title %}Audit Log | AI Server{% endblock %}
+{% block page_title %}Audit Log{% endblock %}
+
+{% block extra_head %}
+<style>
+  .filters-bar { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+  .filters-bar .form-group { display:flex; flex-direction:column; font-size:13px; }
+  .filters-bar label { margin-bottom:3px; color:var(--muted); font-weight:600; }
+  .filters-bar input, .filters-bar select { padding:6px 8px; border:1px solid var(--border); border-radius:4px; background:var(--card-bg); color:var(--text); font-size:13px; }
+  .filters-bar button { padding:6px 16px; }
+  .severity-info { color: var(--text); }
+  .severity-warning { color: #e67e22; font-weight:600; }
+  .severity-error { color: #e74c3c; font-weight:600; }
+  .severity-critical { color: var(--danger); font-weight:700; }
+  .meta-toggle { cursor:pointer; color:var(--accent); font-size:12px; }
+  .meta-pre { display:none; background:var(--card-bg); border:1px solid var(--border); border-radius:4px; padding:8px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; }
+  .meta-pre.open { display:block; }
+  .pager { display:flex; gap:8px; margin-top:12px; align-items:center; }
+  .pager .btn { font-size:13px; padding:4px 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters -->
+<div class="filters-bar">
+  <div class="form-group">
+    <label>From</label>
+    <input type="date" id="filterFrom" value="{{ filter_from }}" />
+  </div>
+  <div class="form-group">
+    <label>To</label>
+    <input type="date" id="filterTo" value="{{ filter_to }}" />
+  </div>
+  {% if is_system_admin %}
+  <div class="form-group">
+    <label>Tenant</label>
+    <input type="text" id="filterTenant" placeholder="all" value="{{ filter_tenant }}" style="width:100px" />
+  </div>
+  {% endif %}
+  <div class="form-group">
+    <label>Event Type</label>
+    <select id="filterEventType">
+      <option value="">All</option>
+      <option value="QUERY_EXECUTED" {% if filter_event_type == 'QUERY_EXECUTED' %}selected{% endif %}>QUERY_EXECUTED</option>
+      <option value="RATE_LIMIT_HIT" {% if filter_event_type == 'RATE_LIMIT_HIT' %}selected{% endif %}>RATE_LIMIT_HIT</option>
+      <option value="TOKEN_QUOTA_EXCEEDED" {% if filter_event_type == 'TOKEN_QUOTA_EXCEEDED' %}selected{% endif %}>TOKEN_QUOTA_EXCEEDED</option>
+      <option value="PLAN_CHANGED" {% if filter_event_type == 'PLAN_CHANGED' %}selected{% endif %}>PLAN_CHANGED</option>
+      <option value="TENANT_QUOTA_OVERRIDE" {% if filter_event_type == 'TENANT_QUOTA_OVERRIDE' %}selected{% endif %}>TENANT_QUOTA_OVERRIDE</option>
+      <option value="ADMIN_ACTION" {% if filter_event_type == 'ADMIN_ACTION' %}selected{% endif %}>ADMIN_ACTION</option>
+      <option value="LOGIN_SUCCESS" {% if filter_event_type == 'LOGIN_SUCCESS' %}selected{% endif %}>LOGIN_SUCCESS</option>
+      <option value="LOGIN_FAILURE" {% if filter_event_type == 'LOGIN_FAILURE' %}selected{% endif %}>LOGIN_FAILURE</option>
+      <option value="DOCUMENT_UPLOADED" {% if filter_event_type == 'DOCUMENT_UPLOADED' %}selected{% endif %}>DOCUMENT_UPLOADED</option>
+      <option value="DOCUMENT_DELETED" {% if filter_event_type == 'DOCUMENT_DELETED' %}selected{% endif %}>DOCUMENT_DELETED</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Severity</label>
+    <select id="filterSeverity">
+      <option value="">All</option>
+      <option value="info" {% if filter_severity == 'info' %}selected{% endif %}>info</option>
+      <option value="warning" {% if filter_severity == 'warning' %}selected{% endif %}>warning</option>
+      <option value="error" {% if filter_severity == 'error' %}selected{% endif %}>error</option>
+      <option value="critical" {% if filter_severity == 'critical' %}selected{% endif %}>critical</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>&nbsp;</label>
+    <button class="btn btn-primary" onclick="applyFilters()">Filter</button>
+  </div>
+</div>
+
+<!-- Showing info -->
+<p style="font-size:13px;color:var(--muted);">
+  Showing {{ items|length }} of {{ total }} event{{ 's' if total != 1 else '' }}
+  (page {{ page }} of {{ total_pages }})
+</p>
+
+<!-- Timeline table -->
+<table class="table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Event</th>
+      <th>Tenant</th>
+      <th>User</th>
+      <th>Actor</th>
+      <th>Severity</th>
+      <th>Ref</th>
+      <th>Metadata</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for evt in items %}
+    <tr>
+      <td style="white-space:nowrap;font-size:12px;">{{ evt.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td><code>{{ evt.event_type }}</code></td>
+      <td>{{ evt.tenant_id }}</td>
+      <td>{{ evt.user_id or '—' }}</td>
+      <td>{{ evt.actor }}</td>
+      <td class="severity-{{ evt.severity }}">{{ evt.severity }}</td>
+      <td>{{ evt.ref_type or '' }}{% if evt.ref_id %}/{{ evt.ref_id }}{% endif %}</td>
+      <td>
+        <span class="meta-toggle" onclick="toggleMeta(this)">▶ show</span>
+        <pre class="meta-pre">{{ evt.metadata_json | tojson(indent=2) }}</pre>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not items %}
+    <tr><td colspan="8" style="text-align:center;color:var(--muted);">No events found.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<!-- Pager -->
+<div class="pager">
+  {% if page > 1 %}
+  <a class="btn" href="?page={{ page - 1 }}&from={{ filter_from }}&to={{ filter_to }}&event_type={{ filter_event_type }}&severity={{ filter_severity }}&tenant_id={{ filter_tenant }}">← Prev</a>
+  {% endif %}
+  <span style="font-size:13px;color:var(--muted);">Page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a class="btn" href="?page={{ page + 1 }}&from={{ filter_from }}&to={{ filter_to }}&event_type={{ filter_event_type }}&severity={{ filter_severity }}&tenant_id={{ filter_tenant }}">Next →</a>
+  {% endif %}
+</div>
+
+<script>
+function toggleMeta(el) {
+  const pre = el.nextElementSibling;
+  pre.classList.toggle('open');
+  el.textContent = pre.classList.contains('open') ? '▼ hide' : '▶ show';
+}
+
+function applyFilters() {
+  const params = new URLSearchParams();
+  const from = document.getElementById('filterFrom').value;
+  const to = document.getElementById('filterTo').value;
+  const eventType = document.getElementById('filterEventType').value;
+  const severity = document.getElementById('filterSeverity').value;
+  const tenantEl = document.getElementById('filterTenant');
+  const tenant = tenantEl ? tenantEl.value : '';
+
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (eventType) params.set('event_type', eventType);
+  if (severity) params.set('severity', severity);
+  if (tenant) params.set('tenant_id', tenant);
+  params.set('page', '1');
+
+  location.href = '/dashboard/audit?' + params.toString();
+}
+</script>
+
+{% endblock %}

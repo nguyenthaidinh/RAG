@@ -1,0 +1,128 @@
+{% extends "layout.html" %}
+
+{% block title %}Settings | AI Server{% endblock %}
+{% block page_title %}Plan & Quota Settings{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     CURRENT PLAN INFO
+     ========================= -->
+<div class="section">
+  <h2>Current Plan</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>Plan Code</h3>
+      <p><strong>{{ tenant_setting.plan_code | upper }}</strong></p>
+    </div>
+    <div class="card">
+      <h3>Rate Limit</h3>
+      <p>{{ policy.per_minute }} / min{% if policy.burst %} (+{{ policy.burst }} burst){% endif %}</p>
+    </div>
+    <div class="card">
+      <h3>Daily Token Quota</h3>
+      <p>{{ "{:,}".format(policy.token_daily) if policy.token_daily else "Unlimited" }}</p>
+    </div>
+    <div class="card">
+      <h3>Monthly Token Quota</h3>
+      <p>{{ "{:,}".format(policy.token_monthly) if policy.token_monthly else "Unlimited" }}</p>
+    </div>
+    <div class="card">
+      <h3>User Rate Limit</h3>
+      <p>{{ "Enabled" if tenant_setting.enforce_user_rate_limit else "Disabled" }}</p>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     UPDATE SETTINGS
+     ========================= -->
+<div class="section">
+  <h2>Update Settings</h2>
+  <div class="card" style="max-width: 640px;">
+    <form id="settingsForm">
+      <div class="form-group">
+        <label>Plan Code</label>
+        <select id="planCode">
+          {% for plan in plans %}
+          <option value="{{ plan.code }}" {% if plan.code == tenant_setting.plan_code %}selected{% endif %}>
+            {{ plan.name }} ({{ plan.code }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="enforceUserRateLimit"
+                 {% if tenant_setting.enforce_user_rate_limit %}checked{% endif %} />
+          Enforce per-user rate limit
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>Quota Overrides (JSON)</label>
+        <textarea id="quotaOverrides" class="token-box" rows="6"
+                  placeholder='{"query_rate": {"per_minute": 200}, "token_quota": {"daily": 100000}}'>{{ quota_overrides_display }}</textarea>
+        <small style="color:var(--muted2);">Leave empty for plan defaults. Deep-merged over plan limits.</small>
+      </div>
+
+      <button type="button" onclick="saveSettings()" class="btn btn-primary">Save Settings</button>
+      <span id="saveStatus" style="margin-left:12px;font-size:13px;color:var(--muted);"></span>
+    </form>
+  </div>
+</div>
+
+<script>
+async function saveSettings() {
+  const statusEl = document.getElementById('saveStatus');
+  statusEl.textContent = 'Saving...';
+
+  const planCode = document.getElementById('planCode').value;
+  const enforceUserRateLimit = document.getElementById('enforceUserRateLimit').checked;
+  const overridesRaw = document.getElementById('quotaOverrides').value.trim();
+
+  let quotaOverrides = null;
+  if (overridesRaw) {
+    try {
+      quotaOverrides = JSON.parse(overridesRaw);
+    } catch (e) {
+      statusEl.textContent = 'Invalid JSON in overrides';
+      statusEl.style.color = 'var(--danger)';
+      return;
+    }
+  }
+
+  const body = {
+    plan_code: planCode,
+    enforce_user_rate_limit: enforceUserRateLimit,
+  };
+  if (quotaOverrides !== null) {
+    body.quota_overrides_json = quotaOverrides;
+  }
+
+  try {
+    const res = await fetch('/api/v1/admin/tenants/{{ tenant_id }}/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      statusEl.textContent = 'Saved!';
+      statusEl.style.color = 'var(--success)';
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const err = await res.json();
+      statusEl.textContent = 'Error: ' + (err.detail || 'Unknown');
+      statusEl.style.color = 'var(--danger)';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Network error';
+    statusEl.style.color = 'var(--danger)';
+  }
+}
+</script>
+
+{% endblock %}

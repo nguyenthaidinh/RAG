@@ -1,0 +1,241 @@
+{% extends "layout.html" %}
+
+{% block title %}API Keys | AI Server{% endblock %}
+{% block page_title %}API Keys Management{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/api-keys.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     FILTER
+     ========================= -->
+<div class="section">
+  <form method="get" action="/dashboard/api-keys" class="flex gap-2" style="flex-wrap: wrap;">
+    <input
+      type="number"
+      name="user_id"
+      placeholder="Filter by User ID..."
+      value="{{ filter_user_id or '' }}"
+      class="token-box"
+      style="width: 200px;"
+    />
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="/dashboard/api-keys" class="btn">Reset</a>
+  </form>
+</div>
+
+<!-- =========================
+     API KEYS TABLE
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>API Keys ({{ api_keys | length }})</h2>
+    <button onclick="showCreateModal()" class="btn btn-primary">+ Create Key</button>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>User</th>
+          <th>Name</th>
+          <th>Prefix</th>
+          <th>Status</th>
+          <th>Last Used</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in api_keys %}
+        <tr>
+          <td>{{ key.id }}</td>
+
+          <td>
+            <strong>{{ key.user_email }}</strong><br>
+            <span style="font-size: 11px; color: var(--muted2);">
+              {{ (key.user_role or '') | upper }}
+            </span>
+          </td>
+
+          <td><strong>{{ key.name }}</strong></td>
+
+          <td style="font-size: 11px; color: var(--muted2); font-family: monospace;">
+            {{ key.prefix }}...
+          </td>
+
+          <td>
+            {% if key.is_active and not key.revoked_at %}
+              <span class="badge badge-success">Active</span>
+            {% else %}
+              <span class="badge badge-danger">Revoked</span>
+            {% endif %}
+          </td>
+
+          <td style="font-size: 12px; color: var(--muted);">
+            {% if key.last_used_at %}
+              {{ key.last_used_at[:16].replace('T', ' ') }}
+            {% else %}
+              Never
+            {% endif %}
+          </td>
+
+          <td style="font-size: 12px; color: var(--muted);">
+            {{ key.created_at[:10] }}
+          </td>
+
+          <td>
+            <div class="flex gap-1">
+              <button
+                data-id="{{ key.id }}"
+                onclick="rotateKey(+this.dataset.id)"
+                class="btn"
+                style="padding: 6px 10px; font-size: 12px;"
+              >
+                Rotate
+              </button>
+
+              {% if key.is_active and not key.revoked_at %}
+              <button
+                data-id="{{ key.id }}"
+                onclick="revokeKey(+this.dataset.id)"
+                class="btn"
+                style="padding: 6px 10px; font-size: 12px;"
+              >
+                Revoke
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 24px; color: var(--muted);">
+            No API keys found
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- =========================
+     CREATE MODAL
+     ========================= -->
+<div id="createModal" class="modal-overlay" style="display: none;">
+  <div class="modal">
+    <button class="modal-close" onclick="closeCreateModal()">×</button>
+    <h3>Create API Key</h3>
+
+    <div class="form-group">
+      <label>User ID</label>
+      <input type="number" id="createUserId" placeholder="Enter user ID" />
+    </div>
+
+    <div class="form-group">
+      <label>Key Name</label>
+      <input type="text" id="createKeyName" placeholder="Enter key name" />
+    </div>
+
+    <div class="flex gap-2 mt-2">
+      <button onclick="doCreateKey()" class="btn btn-primary">Create</button>
+      <button onclick="closeCreateModal()" class="btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showCreateModal() {
+  document.getElementById('createModal').style.display = 'flex';
+}
+
+function closeCreateModal() {
+  document.getElementById('createModal').style.display = 'none';
+}
+
+async function doCreateKey() {
+  const userId = Number(document.getElementById('createUserId').value);
+  const name = document.getElementById('createKeyName').value.trim();
+
+  if (!userId || !name) {
+    alert('Please fill all fields');
+    return;
+  }
+
+  const res = await fetch('/api/v1/admin/api-keys/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ user_id: userId, name })
+  });
+
+  if (res.ok) {
+    const data = await res.json();
+    closeCreateModal();
+    showAPIKeyModal(data.key, 'New API Key Created');
+  } else {
+    const err = await res.json();
+    alert('Failed: ' + (err.detail || 'Unknown error'));
+  }
+}
+
+async function rotateKey(keyId) {
+  if (!confirm('Rotate this API key? Old key will be revoked.')) return;
+
+  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/rotate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include'
+  });
+
+  if (res.ok) {
+    const data = await res.json();
+    showAPIKeyModal(data.key, 'API Key Rotated');
+  } else {
+    alert('Failed to rotate key');
+  }
+}
+
+async function revokeKey(keyId) {
+  if (!confirm('Revoke this API key?')) return;
+
+  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include'
+  });
+
+  if (res.ok) {
+    location.reload();
+  } else {
+    alert('Failed to revoke key');
+  }
+}
+
+function showAPIKeyModal(key, title) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+      <h3>${title}</h3>
+      <p style="color: var(--warning); margin-bottom: 12px; font-size: 12px;">
+        ⚠️ This key will only be shown once. Save it now!
+      </p>
+      <textarea class="token-box" rows="3" readonly onclick="this.select()">${key}</textarea>
+      <button class="btn btn-primary mt-2"
+        onclick="this.closest('.modal-overlay').remove(); location.reload();">
+        Close
+      </button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+</script>
+
+{% endblock %}

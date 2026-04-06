@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="{{ lang | default('vi') }}">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}AI Server{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Link cũ
+    <link rel="stylesheet" href="/static/css/dashboard.css" /> -->
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260313-99" />
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- =========================
+         SIDEBAR
+         ========================= -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M12 4.5a2.5 2.5 0 0 0-4.96-.46 2.5 2.5 0 0 0-1.98 3 2.5 2.5 0 0 0-1.32 4.24 3 3 0 0 0 .34 5.58 2.5 2.5 0 0 0 2.96 3.08A2.5 2.5 0 0 0 12 19.5a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 12 4.5"
+              />
+              <path d="m15.7 10.4-.9.4" />
+              <path d="m9.2 13.2-.9.4" />
+              <path d="m13.6 15.7-.4-.9" />
+              <path d="m10.8 9.2-.4-.9" />
+              <path d="m15.7 13.5-.9-.4" />
+              <path d="m9.2 10.9-.9-.4" />
+              <path d="m10.5 15.7.4-.9" />
+              <path d="m13.1 9.2.4-.9" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">AI Server</span>
+            <span class="brand-sub">{{ t('admin_console') }}</span>
+          </div>
+        </div>
+
+        <nav class="menu">
+          <a
+            href="/dashboard"
+            class="{% if request.url.path == '/dashboard' %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            {{ t('dashboard') }}
+          </a>
+
+          {% if user.role == 'system_admin' %}
+          <div class="menu-title">{{ t('tenants') }}</div>
+
+          <a
+            href="/dashboard/tenants"
+            class="{% if request.url.path.startswith('/dashboard/tenants') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+              <path d="M10 6h4" />
+              <path d="M10 10h4" />
+              <path d="M10 14h4" />
+              <path d="M10 18h4" />
+            </svg>
+            {{ t('tenants') }}
+          </a>
+          {% endif %}
+
+          <div class="menu-title">{{ t('management') }}</div>
+
+          <a
+            href="/dashboard/users"
+            class="{% if request.url.path.startswith('/dashboard/users') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            {{ t('users') }}
+          </a>
+
+          <a
+            href="/dashboard/documents"
+            class="{% if request.url.path.startswith('/dashboard/documents') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+              <path d="M10 9H8" />
+              <path d="M16 13H8" />
+              <path d="M16 17H8" />
+            </svg>
+            {{ t('documents') if t else 'Documents' }}
+          </a>
+
+          <a
+            href="/dashboard/api-keys"
+            class="{% if request.url.path.startswith('/dashboard/api-keys') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"
+              />
+              <path d="m21 2-9.6 9.6" />
+              <circle cx="7.5" cy="15.5" r="5.5" />
+            </svg>
+            {{ t('api_keys') }}
+          </a>
+
+          <a
+            href="/dashboard/usage"
+            class="{% if request.url.path.startswith('/dashboard/usage') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M3 3v18h18" />
+              <path d="m19 9-5 5-4-4-3 3" />
+            </svg>
+            {{ t('usage') }}
+          </a>
+
+          <a
+            href="/dashboard/settings"
+            class="{% if request.url.path.startswith('/dashboard/settings') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            {{ t('plan_quotas') }}
+          </a>
+
+          <div class="menu-title">{{ t('monitoring') }}</div>
+
+          <a
+            href="/dashboard/audit"
+            class="{% if request.url.path.startswith('/dashboard/audit') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 12h.01" />
+              <path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+              <path d="M22 13a18.15 18.15 0 0 1-20 0" />
+              <rect width="20" height="14" x="2" y="6" rx="2" />
+            </svg>
+            {{ t('audit_log') }}
+          </a>
+
+          <a
+            href="/dashboard/ops"
+            class="{% if request.url.path.startswith('/dashboard/ops') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            {{ t('ops_dashboard') }}
+          </a>
+
+          <div class="menu-title">{{ t('tools') }}</div>
+
+          <a
+            href="/dashboard/api-test"
+            class="{% if request.url.path.startswith('/dashboard/api-test') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            {{ t('api_test') }}
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <!-- Language Switcher -->
+          <div class="lang-switcher">
+            <form
+              method="post"
+              action="/set-language"
+              style="display: flex; gap: 4px"
+            >
+              <button
+                type="submit"
+                name="language"
+                value="vi"
+                class="lang-btn {% if lang == 'vi' %}lang-active{% endif %}"
+                title="Tiếng Việt"
+              >
+                🇻🇳 VI
+              </button>
+              <button
+                type="submit"
+                name="language"
+                value="en"
+                class="lang-btn {% if lang == 'en' %}lang-active{% endif %}"
+                title="English"
+              >
+                🇬🇧 EN
+              </button>
+            </form>
+          </div>
+          <div class="version">v1.0 · Phase 8</div>
+        </div>
+      </aside>
+
+      <!-- =========================
+         MAIN
+         ========================= -->
+      <main class="main">
+        <!-- Header -->
+        <header class="header">
+          <div class="header-left">
+            <span class="page-title">
+              {% block page_title %}{% endblock %}
+            </span>
+          </div>
+
+          <div class="header-right">
+            <div class="user-badge">
+              <span class="dot"></span>
+              <div class="user-avatar">{{ user.email[:2] | upper }}</div>
+              <div class="user-info">
+                <span class="email">{{ user.email }}</span>
+                <span class="role">{{ user.role }}</span>
+              </div>
+            </div>
+
+            <a href="/logout" class="btn btn-sm">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" x2="9" y1="12" y2="12" />
+              </svg>
+              {{ t('logout') }}
+            </a>
+          </div>
+        </header>
+
+        <!-- Content -->
+        <section class="content">{% block content %}{% endblock %}</section>
+      </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Toast JS helper -->
+    <script>
+      function showToast(message, type) {
+        type = type || "success";
+        var container = document.getElementById("toastContainer");
+        var toast = document.createElement("div");
+        toast.className = "toast toast-" + type;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(function () {
+          toast.style.opacity = "0";
+          toast.style.transform = "translateX(20px)";
+          toast.style.transition = "all .3s ease";
+          setTimeout(function () {
+            toast.remove();
+          }, 300);
+        }, 3000);
+      }
+    </script>
+
+    {% block extra_scripts %}{% endblock %}
+  </body>
+</html>

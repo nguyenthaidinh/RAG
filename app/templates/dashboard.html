@@ -1,0 +1,146 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ t('dashboard') }} | AI Server{% endblock %}
+{% block page_title %}{{ t('dashboard') }}{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     WELCOME + OVERVIEW CARDS
+     ========================= -->
+<div class="cards">
+  <div class="card card-accent">
+    <h3>{{ t('welcome') }}</h3>
+    <p style="font-size: 16px;">{{ user.email }}</p>
+  </div>
+
+  <div class="card">
+    <h3>{{ t('role') }}</h3>
+    <p>
+      <span class="badge badge-primary">{{ user.role | upper }}</span>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>{{ t('status') }}</h3>
+    <p>
+      <span class="badge {% if user.is_active %}badge-success{% else %}badge-danger{% endif %}">
+        {{ t('active') if user.is_active else t('disabled') }}
+      </span>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>{{ t('tenant') }}</h3>
+    <p style="font-size: 13px;" class="mono">{{ user.tenant_id }}</p>
+  </div>
+</div>
+
+<!-- =========================
+     QUERY ANALYTICS KPIs
+     ========================= -->
+{% if query_kpis %}
+<div class="section">
+  <h2>{{ t('query_analytics') }}</h2>
+
+  <div class="cards">
+    <div class="card card-success">
+      <h3>{{ t('queries_24h') }}</h3>
+      <p class="stat-number">{{ "{:,}".format(query_kpis.queries_24h) }}</p>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('queries_7d') }}</h3>
+      <p class="stat-number">{{ "{:,}".format(query_kpis.queries_7d) }}</p>
+    </div>
+
+    <div class="card card-warning">
+      <h3>{{ t('tokens_used_7d') }}</h3>
+      <p class="stat-number">{{ "{:,}".format(query_kpis.tokens_7d) }}</p>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('avg_latency_24h') }}</h3>
+      <p class="stat-number">{{ "%.0f" | format(query_kpis.avg_latency_24h) }}<span style="font-size: 14px; font-weight: 500; color: var(--muted);"> ms</span></p>
+    </div>
+
+    {% if query_kpis.top_tenant %}
+    <div class="card card-accent">
+      <h3>{{ t('top_tenant_7d') }}</h3>
+      <p style="font-size: 14px;" class="mono">
+        {{ query_kpis.top_tenant.tenant_id }}
+      </p>
+      <small style="color:var(--muted2); font-size: 12px;">
+        {{ "{:,}".format(query_kpis.top_tenant.tokens) }} tokens
+      </small>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- =========================
+     QUICK ACTIONS
+     ========================= -->
+<div class="section">
+  <h2>{{ t('quick_actions') }}</h2>
+
+  <div class="cards">
+    <a href="/dashboard/users" class="card" style="text-decoration: none; cursor: pointer;">
+      <h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        {{ t('manage_users') }}
+      </h3>
+      <p style="font-size: 13px; color: var(--muted); font-weight: 400;">{{ t('manage_users_desc') }}</p>
+    </a>
+
+    <a href="/dashboard/api-keys" class="card" style="text-decoration: none; cursor: pointer;">
+      <h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
+        {{ t('api_keys') }}
+      </h3>
+      <p style="font-size: 13px; color: var(--muted); font-weight: 400;">{{ t('api_keys_desc') }}</p>
+    </a>
+
+    <a href="/dashboard/api-test" class="card" style="text-decoration: none; cursor: pointer;">
+      <h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        {{ t('api_test') }}
+      </h3>
+      <p style="font-size: 13px; color: var(--muted); font-weight: 400;">{{ t('api_test_desc') }}</p>
+    </a>
+
+    <a href="/dashboard/ops" class="card" style="text-decoration: none; cursor: pointer;">
+      <h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        {{ t('operations') }}
+      </h3>
+      <p style="font-size: 13px; color: var(--muted); font-weight: 400;">{{ t('operations_desc') }}</p>
+    </a>
+  </div>
+</div>
+
+<!-- =========================
+     AUTH & SYSTEM INFO
+     ========================= -->
+<div class="section">
+  <div class="cards">
+    <div class="card">
+      <h3>{{ t('authentication') }}</h3>
+      <p style="font-size: 13px; font-weight: 500;">
+        <span class="badge badge-success">{{ t('secure') }}</span>
+      </p>
+      <p style="margin-top: 8px; font-size: 12px; color: var(--muted2);">
+        {{ t('auth_desc') }}
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('runtime') }}</h3>
+      <p style="font-size: 14px; font-weight: 600;">FastAPI + Uvicorn</p>
+      <p style="margin-top: 4px; font-size: 12px; color: var(--muted2);">Python 3.x · Async</p>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

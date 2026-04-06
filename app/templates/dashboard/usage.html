@@ -1,0 +1,221 @@
+{% extends "layout.html" %}
+
+{% block title %}Usage | AI Server{% endblock %}
+{% block page_title %}Usage Analytics{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     API USAGE SUMMARY CARDS
+     ========================= -->
+<div class="cards">
+  <div class="card">
+    <h3>Total Requests</h3>
+    <p>{{ "{:,}".format(summary.total_requests) }}</p>
+  </div>
+
+  <div class="card">
+    <h3>Total Tokens</h3>
+    <p>{{ "{:,}".format(summary.total_tokens) }}</p>
+  </div>
+
+  <div class="card">
+    <h3>Total Storage</h3>
+    <p>{{ "{:.2f}".format(summary.total_storage / 1024 / 1024) }} MB</p>
+  </div>
+
+  <div class="card">
+    <h3>Period</h3>
+    <p style="font-size: 13px;">{{ summary.from_date[:10] }} to {{ summary.to_date[:10] }}</p>
+  </div>
+</div>
+
+<!-- =========================
+     QUERY USAGE SECTION (Phase 4.2)
+     ========================= -->
+<div class="section">
+  <h2>Query Usage</h2>
+
+  <!-- Query summary KPIs -->
+  <div class="cards">
+    <div class="card">
+      <h3>Query Count</h3>
+      <p>{{ "{:,}".format(query_summary.total_queries) }}</p>
+    </div>
+    <div class="card">
+      <h3>Query Tokens</h3>
+      <p>{{ "{:,}".format(query_summary.total_tokens) }}</p>
+    </div>
+    <div class="card">
+      <h3>Avg Latency</h3>
+      <p>{{ "%.1f" | format(query_summary.avg_latency_ms) }} ms</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="get" action="/dashboard/usage" style="margin-top:16px;">
+    <div class="form-row">
+      <div class="form-group">
+        <label>From</label>
+        <input type="date" name="from_date" value="{{ filter_from }}" />
+      </div>
+      <div class="form-group">
+        <label>To</label>
+        <input type="date" name="to_date" value="{{ filter_to }}" />
+      </div>
+      <div class="form-group">
+        <label>Mode</label>
+        <select name="mode">
+          <option value="">All</option>
+          <option value="vector" {% if filter_mode == 'vector' %}selected{% endif %}>Vector</option>
+          <option value="bm25" {% if filter_mode == 'bm25' %}selected{% endif %}>BM25</option>
+          <option value="hybrid" {% if filter_mode == 'hybrid' %}selected{% endif %}>Hybrid</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tenant ID</label>
+        <input type="text" name="tenant_id" value="{{ filter_tenant }}" placeholder="Optional" />
+      </div>
+      <div class="form-group">
+        <label>User ID</label>
+        <input type="number" name="user_id" value="{{ filter_user }}" placeholder="Optional" />
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;">
+        <button type="submit" class="btn btn-primary">Filter</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Query usage table -->
+  <div class="table-container" style="margin-top:16px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Tenant</th>
+          <th>User</th>
+          <th>Mode</th>
+          <th>Results</th>
+          <th>Tokens Q</th>
+          <th>Tokens C</th>
+          <th>Tokens Total</th>
+          <th>Latency (ms)</th>
+          <th>Query Hash</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in query_items %}
+        <tr>
+          <td style="font-size:12px;white-space:nowrap;color:var(--muted);">{{ item.created_at[:19] if item.created_at else "—" }}</td>
+          <td style="font-size:12px;">{{ item.tenant_id }}</td>
+          <td>{{ item.user_id if item.user_id else "—" }}</td>
+          <td><span class="badge badge-muted">{{ item.mode | upper }}</span></td>
+          <td>{{ item.results_count }}</td>
+          <td>{{ "{:,}".format(item.tokens_query) }}</td>
+          <td>{{ "{:,}".format(item.tokens_context) }}</td>
+          <td><strong>{{ "{:,}".format(item.tokens_total) }}</strong></td>
+          <td>{{ "{:,}".format(item.latency_ms) }}</td>
+          <td style="font-size:11px;font-family:monospace;color:var(--muted2);">{{ item.query_hash[:10] }}…</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="10" style="text-align:center;padding:24px;color:var(--muted);">
+            No query usage data
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if query_total_pages > 1 %}
+  <div style="margin-top:12px;display:flex;gap:8px;align-items:center;justify-content:center;">
+    {% if query_page > 1 %}
+    <a href="?page={{ query_page - 1 }}{% if filter_from %}&from_date={{ filter_from }}{% endif %}{% if filter_to %}&to_date={{ filter_to }}{% endif %}{% if filter_mode %}&mode={{ filter_mode }}{% endif %}{% if filter_tenant %}&tenant_id={{ filter_tenant }}{% endif %}{% if filter_user %}&user_id={{ filter_user }}{% endif %}" class="btn" style="padding:6px 12px;font-size:12px;">← Prev</a>
+    {% endif %}
+    <span style="font-size:13px;color:var(--muted);">
+      Page {{ query_page }} of {{ query_total_pages }} ({{ "{:,}".format(query_total) }} total)
+    </span>
+    {% if query_page < query_total_pages %}
+    <a href="?page={{ query_page + 1 }}{% if filter_from %}&from_date={{ filter_from }}{% endif %}{% if filter_to %}&to_date={{ filter_to }}{% endif %}{% if filter_mode %}&mode={{ filter_mode }}{% endif %}{% if filter_tenant %}&tenant_id={{ filter_tenant }}{% endif %}{% if filter_user %}&user_id={{ filter_user }}{% endif %}" class="btn" style="padding:6px 12px;font-size:12px;">Next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- =========================
+     TOP USERS
+     ========================= -->
+<div class="section">
+  <h2>Top Users by Requests</h2>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>User ID</th>
+          <th>Email</th>
+          <th>Requests</th>
+          <th>Tokens</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in summary.top_users %}
+        <tr>
+          <td>{{ user.user_id }}</td>
+          <td><strong>{{ user.email }}</strong></td>
+          <td>{{ "{:,}".format(user.request_count) }}</td>
+          <td>{{ "{:,}".format(user.tokens_total) }}</td>
+          <td>
+            <a href="/dashboard/users/{{ user.user_id }}" class="btn" style="padding: 6px 10px; font-size: 12px;">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 24px; color: var(--muted);">
+            No data
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- =========================
+     TOP ENDPOINTS
+     ========================= -->
+<div class="section">
+  <h2>Top Endpoints</h2>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Method</th>
+          <th>Requests</th>
+          <th>Tokens</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for endpoint in summary.top_endpoints %}
+        <tr>
+          <td style="font-size: 12px; font-family: monospace;">{{ endpoint.endpoint }}</td>
+          <td><span class="badge badge-muted">{{ endpoint.method }}</span></td>
+          <td>{{ "{:,}".format(endpoint.request_count) }}</td>
+          <td>{{ "{:,}".format(endpoint.tokens_total) }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" style="text-align: center; padding: 24px; color: var(--muted);">
+            No data
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

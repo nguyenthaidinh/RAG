@@ -1,0 +1,313 @@
+{% extends "layout.html" %}
+
+{% block title %}User Detail | AI Server{% endblock %}
+{% block page_title %}User: {{ target_user.email }}{% endblock %}
+
+{% block content %}
+
+<div class="flex gap-2" style="flex-wrap: wrap;">
+  <a href="/dashboard/users" class="btn">← Back to Users</a>
+</div>
+
+<!-- =========================
+     USER INFO CARD
+     ========================= -->
+<div class="section">
+  <div class="card">
+    <h3>User Information</h3>
+    <div class="form-row mt-2">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="text" value="{{ target_user.email }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <input type="text" value="{{ target_user.role | upper }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Tenant ID</label>
+        <input type="text" value="{{ target_user.tenant_id }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <span class="badge {% if target_user.is_active %}badge-success{% else %}badge-danger{% endif %}">
+          {{ "Active" if target_user.is_active else "Inactive" }}
+        </span>
+      </div>
+    </div>
+
+    <div class="flex gap-2 mt-2">
+      <button onclick="toggleUserStatus({{ target_user.id }}, {{ 'false' if target_user.is_active else 'true' }})" class="btn {% if target_user.is_active %}btn-danger{% else %}btn-primary{% endif %}">
+        {{ "Disable" if target_user.is_active else "Enable" }}
+      </button>
+      <button onclick="changeRole({{ target_user.id }})" class="btn">Change Role</button>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     QUOTA CARD
+     ========================= -->
+{% if quota %}
+<div class="section">
+  <div class="card">
+    <h3>Quota</h3>
+    <div class="form-row mt-2">
+      <div class="form-group">
+        <label>Plan</label>
+        <input type="text" value="{{ quota.plan }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Max Tokens</label>
+        <input type="text" value="{{ quota.max_tokens if quota.max_tokens != -1 else 'Unlimited' }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Used Tokens</label>
+        <input type="text" value="{{ quota.used_tokens }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Max Requests</label>
+        <input type="text" value="{{ quota.max_requests if quota.max_requests != -1 else 'Unlimited' }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Used Requests</label>
+        <input type="text" value="{{ quota.used_requests }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Max Storage (MB)</label>
+        <input type="text" value="{{ quota.max_storage_mb if quota.max_storage_mb != -1 else 'Unlimited' }}" readonly />
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- =========================
+     API KEYS
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>API Keys ({{ api_keys | length }})</h2>
+    <button onclick="createAPIKey({{ target_user.id }})" class="btn btn-primary">+ Create Key</button>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Prefix</th>
+          <th>Status</th>
+          <th>Last Used</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in api_keys %}
+        <tr>
+          <td><strong>{{ key.name }}</strong></td>
+          <td style="font-size: 11px; color: var(--muted2);">ak_live_{{ key.prefix }}...</td>
+          <td>
+            <span class="badge {% if key.is_active and not key.revoked_at %}badge-success{% else %}badge-danger{% endif %}">
+              {{ "Active" if key.is_active and not key.revoked_at else "Revoked" }}
+            </span>
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">
+            {{ key.last_used_at.strftime('%Y-%m-%d %H:%M') if key.last_used_at else "Never" }}
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">{{ key.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <div class="flex gap-1">
+              <button onclick="rotateKey({{ key.id }})" class="btn" style="padding: 6px 10px; font-size: 12px;">Rotate</button>
+              {% if key.is_active %}
+              <button onclick="revokeKey({{ key.id }})" class="btn" style="padding: 6px 10px; font-size: 12px;">Revoke</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" style="text-align: center; padding: 24px; color: var(--muted);">
+            No API keys
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- =========================
+     QUERY STATS (Phase 4.2)
+     ========================= -->
+{% if user_query_stats %}
+<div class="section">
+  <div class="card">
+    <h3>Query Activity (Last 7 Days)</h3>
+    <div class="form-row mt-2">
+      <div class="form-group">
+        <label>Queries</label>
+        <input type="text" value="{{ '{:,}'.format(user_query_stats.total_queries) }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Tokens Used</label>
+        <input type="text" value="{{ '{:,}'.format(user_query_stats.total_tokens) }}" readonly />
+      </div>
+      <div class="form-group">
+        <label>Avg Latency</label>
+        <input type="text" value="{{ '%.1f' | format(user_query_stats.avg_latency_ms) }} ms" readonly />
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- =========================
+     RECENT USAGE
+     ========================= -->
+<div class="section">
+  <h2>Recent Usage (Last 20)</h2>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Method</th>
+          <th>Tokens</th>
+          <th>Status</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for usage in recent_usage %}
+        <tr>
+          <td style="font-size: 12px;">{{ usage.endpoint }}</td>
+          <td><span class="badge badge-muted">{{ usage.method }}</span></td>
+          <td>{{ usage.tokens_total }}</td>
+          <td>
+            <span class="badge {% if usage.success %}badge-success{% else %}badge-danger{% endif %}">
+              {{ usage.status_code }}
+            </span>
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">{{ usage.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 24px; color: var(--muted);">
+            No usage data
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+async function toggleUserStatus(userId, isActive) {
+  if (!confirm(`Are you sure you want to ${isActive ? 'enable' : 'disable'} this user?`)) return;
+  
+  const res = await fetch(`/api/v1/admin/users/${userId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ is_active: isActive })
+  });
+  
+  if (res.ok) {
+    location.reload();
+  } else {
+    alert('Failed to update user status');
+  }
+}
+
+async function changeRole(userId) {
+  const role = prompt('Enter new role (user/admin):');
+  if (!role || !['user', 'admin'].includes(role)) return;
+  
+  const res = await fetch(`/api/v1/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ role })
+  });
+  
+  if (res.ok) {
+    location.reload();
+  } else {
+    alert('Failed to update role');
+  }
+}
+
+async function createAPIKey(userId) {
+  const name = prompt('Enter API key name:');
+  if (!name) return;
+  
+  const res = await fetch('/api/v1/admin/api-keys/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ user_id: userId, name })
+  });
+  
+  if (res.ok) {
+    const data = await res.json();
+    showAPIKeyModal(data.key, 'New API Key Created');
+  } else {
+    alert('Failed to create API key');
+  }
+}
+
+async function rotateKey(keyId) {
+  if (!confirm('Rotate this API key? Old key will be revoked.')) return;
+  
+  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/rotate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include'
+  });
+  
+  if (res.ok) {
+    const data = await res.json();
+    showAPIKeyModal(data.key, 'API Key Rotated');
+  } else {
+    alert('Failed to rotate key');
+  }
+}
+
+async function revokeKey(keyId) {
+  if (!confirm('Revoke this API key?')) return;
+  
+  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include'
+  });
+  
+  if (res.ok) {
+    location.reload();
+  } else {
+    alert('Failed to revoke key');
+  }
+}
+
+function showAPIKeyModal(key, title) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+      <h3>${title}</h3>
+      <p style="color: var(--warning); margin-bottom: 12px; font-size: 12px;">
+        ⚠️ This key will only be shown once. Save it now!
+      </p>
+      <textarea class="token-box" rows="3" readonly onclick="this.select()">${key}</textarea>
+      <button class="btn btn-primary mt-2" onclick="this.closest('.modal-overlay').remove(); location.reload();">Close</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+</script>
+
+{% endblock %}

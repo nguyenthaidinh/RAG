@@ -1,0 +1,54 @@
+name: Deploy AI Server to VPS
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ai-server-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }} # MUST be administrator
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          timeout: 60s
+          command_timeout: 30m
+          script_stop: true
+          request_pty: true
+          script: |
+            set -euo pipefail
+
+            LOCK="/tmp/deploy-ai-server.lock"
+            exec 9>"$LOCK"
+            flock -n 9 || { echo "Another deploy is running"; exit 1; }
+
+            echo "==> whoami"
+            whoami
+            id
+
+            APP_DIR="/home/administrator/ai-server"
+            VENV_DIR="$APP_DIR/venv"
+
+            cd "$APP_DIR"
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            test -f "$VENV_DIR/bin/activate" || { echo "VENV not found: $VENV_DIR"; exit 1; }
+            source "$VENV_DIR/bin/activate"
+
+            python -m pip install -U pip wheel setuptools
+            python -m pip install -r requirements.txt
+
+            sudo -n /usr/bin/systemctl restart ai-server.service
+            sudo -n /usr/bin/systemctl is-active --quiet ai-server.service
+
+            echo "✅ Deploy OK"

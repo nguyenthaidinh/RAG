@@ -1,0 +1,150 @@
+{% extends "layout.html" %}
+
+{% block title %}Create User | AI Server{% endblock %}
+{% block page_title %}Create New User{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/user-form.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<div class="section" style="max-width:720px;">
+
+  <div class="card">
+
+    <h2 style="margin-bottom:6px;">Create new user</h2>
+    <p style="color:var(--muted2);margin-bottom:20px;">
+      Tạo tài khoản người dùng mới trong hệ thống
+    </p>
+
+    {% if error %}
+      <div class="alert error">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <form method="post" action="/dashboard/users/new" onsubmit="return validateForm()">
+      <!-- CSRF double-submit token (populated by JS from cookie) -->
+      <input type="hidden" name="csrf_token" id="csrf_token" value="" />
+
+      <!-- EMAIL -->
+      <div class="form-group">
+        <label>Email</label>
+        <input
+          type="email"
+          name="email"
+          required
+          placeholder="user@example.com"
+        />
+      </div>
+
+      <!-- PASSWORD -->
+      <div class="form-group">
+        <label>Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          required
+          minlength="8"
+          placeholder="Ít nhất 8 ký tự"
+        />
+      </div>
+
+      <!-- CONFIRM -->
+      <div class="form-group">
+        <label>Confirm password</label>
+        <input
+          type="password"
+          id="confirm_password"
+          required
+          placeholder="Nhập lại mật khẩu"
+        />
+        <small class="muted">
+          Mật khẩu phải khớp
+        </small>
+      </div>
+
+      <!-- TENANT ID -->
+      {% if user.role == "system_admin" %}
+        <div class="form-group">
+          <label>Tenant ID</label>
+          <input
+            type="text"
+            name="tenant_id"
+            required
+            placeholder="e.g. tenant_abc"
+          />
+        </div>
+      {% else %}
+        <input type="hidden" name="tenant_id" value="{{ user.tenant_id }}" />
+      {% endif %}
+
+      <!-- ROLE -->
+      <div class="form-group">
+        <label>Role</label>
+        <select name="role">
+          <option value="user">User</option>
+          <option value="tenant_admin">Tenant Admin</option>
+          {% if user.role == "system_admin" %}
+            <option value="system_admin">System Admin</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <!-- STATUS -->
+      <div class="form-group">
+        <label>Status</label>
+        <select name="is_active">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </div>
+
+      <!-- ACTIONS -->
+      <div style="display:flex;gap:12px;margin-top:24px;">
+        <button type="submit" class="btn btn-primary">
+          Create User
+        </button>
+
+        <a href="/dashboard/users" class="btn">
+          Cancel
+        </a>
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+<script>
+// Populate CSRF hidden field from double-submit cookie
+(function() {
+  var m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  if (m) {
+    var el = document.getElementById('csrf_token');
+    if (el) el.value = decodeURIComponent(m[1]);
+  }
+})();
+
+function validateForm() {
+  const pwd = document.getElementById("password").value;
+  const confirm = document.getElementById("confirm_password").value;
+
+  if (pwd !== confirm) {
+    alert("Mật khẩu không khớp");
+    return false;
+  }
+
+  if (pwd.length < 8) {
+    alert("Mật khẩu phải ít nhất 8 ký tự");
+    return false;
+  }
+
+  return true;
+}
+</script>
+
+{% endblock %}

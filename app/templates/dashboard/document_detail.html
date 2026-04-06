@@ -1,0 +1,314 @@
+{% extends "layout.html" %}
+
+{% block title %}Document #{{ doc.id }} | AI Server{% endblock %}
+{% block page_title %}Document Detail{% endblock %}
+
+{% block extra_head %}
+<style>
+  .doc-meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .doc-meta-item { background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+  .doc-meta-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .doc-meta-value { font-size: 14px; word-break: break-all; }
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+  .tab-btn { padding: 8px 16px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all .2s; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .preview-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .timeline { position: relative; padding-left: 24px; }
+  .timeline::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+  .timeline-item { position: relative; margin-bottom: 16px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+  .timeline-item::before { content: ''; position: absolute; left: -20px; top: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+  .timeline-type { font-size: 12px; font-weight: 600; color: var(--accent); }
+  .timeline-time { font-size: 11px; color: var(--muted); }
+  .timeline-msg { font-size: 13px; margin-top: 4px; }
+  .relation-card { display: inline-block; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 4px; }
+  .relation-card a { color: var(--accent); text-decoration: none; }
+  .download-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge-primary { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+  .badge-warning { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+  .info-note { font-size: 12px; color: var(--muted); margin-bottom: 12px; padding: 8px 12px; background: rgba(99, 102, 241, 0.06); border-radius: 6px; border-left: 3px solid var(--accent); }
+  .flash-msg { padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+  .flash-ok { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); color: #22c55e; }
+  .flash-err { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; }
+  .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .action-bar form { margin: 0; }
+  .btn-action { padding: 8px 14px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: all .2s; background: var(--surface); color: var(--text); }
+  .btn-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-action-danger { border-color: rgba(245, 158, 11, 0.4); color: #f59e0b; }
+  .btn-action-danger:hover:not(:disabled) { border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+</style>
+{% endblock %}
+
+{% set _tid = tenant_id_param if tenant_id_param else '' %}
+{% set _tid_qs = '?tenant_id=' ~ _tid if _tid else '' %}
+
+{% block content %}
+
+<!-- Flash message -->
+{% if flash_message %}
+<div class="flash-msg {% if flash_ok == '1' %}flash-ok{% else %}flash-err{% endif %}">
+  {{ flash_message }}
+</div>
+{% endif %}
+
+<!-- =========================
+     BREADCRUMB
+     ========================= -->
+<div style="margin-bottom: 16px;">
+  <a href="/dashboard/documents{% if _tid %}?tenant_id={{ _tid }}{% endif %}" class="btn" style="padding: 6px 12px; font-size: 12px;">← Back to Documents</a>
+</div>
+
+<!-- =========================
+     SUMMARY
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>{{ doc.title or 'Untitled Document' }}</h2>
+    <div style="display: flex; gap: 8px;">
+      <span class="badge {% if doc.status == 'ready' %}badge-success{% elif doc.status == 'error' %}badge-danger{% elif doc.status == 'uploaded' %}badge-warning{% else %}badge-muted{% endif %}">
+        {{ doc.status }}
+      </span>
+      <span class="badge {% if doc.representation_type == 'synthesized' %}badge-primary{% else %}badge-muted{% endif %}">
+        {{ doc.representation_type }}
+      </span>
+    </div>
+  </div>
+
+  <div class="doc-meta-grid">
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Document ID</div>
+      <div class="doc-meta-value">{{ doc.id }}</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Tenant</div>
+      <div class="doc-meta-value">{{ doc.tenant_id }}</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Source</div>
+      <div class="doc-meta-value">{{ doc.source }}</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">External ID</div>
+      <div class="doc-meta-value" style="font-size: 12px;">{{ doc.external_id[:80] }}{% if doc.external_id|length > 80 %}...{% endif %}</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Created</div>
+      <div class="doc-meta-value">{{ doc.created_at.strftime('%Y-%m-%d %H:%M:%S') if doc.created_at else '-' }}</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Updated</div>
+      <div class="doc-meta-value">{{ doc.updated_at.strftime('%Y-%m-%d %H:%M:%S') if doc.updated_at else '-' }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     ACTIONS (Phase 2B)
+     ========================= -->
+<div class="section">
+  <h3 style="margin-bottom: 8px;">Actions</h3>
+  <div class="info-note">
+    Actions re-process using stored content only — they do not re-download the original file.
+  </div>
+  <div class="action-bar">
+    <form method="post" action="/dashboard/documents/{{ doc.id }}/retry-ingest"
+          onsubmit="return confirm('Retry ingest from stored content? This will re-run the full pipeline.');">
+      <input type="hidden" name="tenant_id" value="{{ _tid }}">
+      <button type="submit" class="btn-action btn-action-danger" {% if not can_retry_ingest %}disabled title="Not available in status '{{ doc.status }}'"{% endif %}>
+        🔄 Retry Ingest from Stored Content
+      </button>
+    </form>
+
+    <form method="post" action="/dashboard/documents/{{ doc.id }}/reindex"
+          onsubmit="return confirm('Reindex document vectors? This will re-chunk and re-embed.');">
+      <input type="hidden" name="tenant_id" value="{{ _tid }}">
+      <button type="submit" class="btn-action" {% if not can_reindex %}disabled title="Not available in status '{{ doc.status }}'"{% endif %}>
+        📊 Reindex Vectors
+      </button>
+    </form>
+
+    {% if doc.representation_type == 'original' %}
+    <form method="post" action="/dashboard/documents/{{ doc.id }}/resynthesize"
+          onsubmit="return confirm('Regenerate synthesized representation? This will call the synthesis engine.');">
+      <input type="hidden" name="tenant_id" value="{{ _tid }}">
+      <button type="submit" class="btn-action" {% if not can_resynthesize %}disabled title="Cannot synthesize this document"{% endif %}>
+        ✨ Regenerate Synthesis
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<!-- =========================
+     METADATA
+     ========================= -->
+<div class="section">
+  <h3 style="margin-bottom: 12px;">Metadata</h3>
+  <div class="doc-meta-grid">
+    {% for key, val in metadata.items() %}
+    {% if val is not none %}
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">{{ key }}</div>
+      <div class="doc-meta-value">{{ val }}</div>
+    </div>
+    {% endif %}
+    {% endfor %}
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Raw Size</div>
+      <div class="doc-meta-value">{{ "{:,}".format(content_stats.raw_length) }} chars</div>
+    </div>
+    <div class="doc-meta-item">
+      <div class="doc-meta-label">Cleaned Size</div>
+      <div class="doc-meta-value">{{ "{:,}".format(content_stats.text_length) }} chars</div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     RELATED REPRESENTATIONS
+     ========================= -->
+{% if related.parent or related.children %}
+<div class="section">
+  <h3 style="margin-bottom: 12px;">Related Representations</h3>
+
+  {% if related.parent %}
+  <div style="margin-bottom: 8px;">
+    <span style="font-size: 12px; color: var(--muted);">Parent:</span>
+    <div class="relation-card">
+      <a href="/dashboard/documents/{{ related.parent.id }}{{ _tid_qs }}">
+        #{{ related.parent.id }} — {{ related.parent.title or 'Untitled' }}
+      </a>
+      <span class="badge badge-muted" style="margin-left: 8px;">{{ related.parent.representation_type }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if related.children %}
+  <div>
+    <span style="font-size: 12px; color: var(--muted);">Children ({{ related.children|length }}):</span>
+    <div>
+      {% for child in related.children %}
+      <div class="relation-card">
+        <a href="/dashboard/documents/{{ child.id }}{{ _tid_qs }}">
+          #{{ child.id }} — {{ child.title or 'Untitled' }}
+        </a>
+        <span class="badge badge-primary" style="margin-left: 8px;">{{ child.representation_type }}</span>
+        <span class="badge {% if child.status == 'ready' %}badge-success{% elif child.status == 'error' %}badge-danger{% else %}badge-muted{% endif %}" style="margin-left: 4px;">{{ child.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- =========================
+     INGESTED CONTENT PREVIEW
+     ========================= -->
+<div class="section">
+  <h3 style="margin-bottom: 4px;">Ingested Content Preview</h3>
+  <div class="info-note">
+    Showing the text extracted during ingest — not the original file. Download options below also export the stored representation.
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="cleaned" onclick="switchTab('cleaned')">Cleaned Text</button>
+    <button class="tab-btn" data-tab="raw" onclick="switchTab('raw')">Raw Extracted</button>
+    {% if doc.representation_type == 'synthesized' %}
+    <button class="tab-btn" data-tab="synthesized" onclick="switchTab('synthesized')">Synthesized</button>
+    {% endif %}
+  </div>
+
+  <div id="tab-cleaned" class="tab-content active">
+    <div class="preview-box">{{ preview_cleaned.content if preview_cleaned and preview_cleaned.content else '(no cleaned content)' }}</div>
+    {% if preview_cleaned and preview_cleaned.truncated %}
+    <div style="font-size: 11px; color: var(--muted); margin-top: 8px;">⚠ Truncated to {{ "{:,}".format(preview_cleaned.shown_length) }} chars (full: {{ "{:,}".format(preview_cleaned.full_length) }})</div>
+    {% endif %}
+  </div>
+
+  <div id="tab-raw" class="tab-content">
+    <div class="preview-box">{{ preview_raw.content if preview_raw and preview_raw.content else '(no raw content)' }}</div>
+    {% if preview_raw and preview_raw.truncated %}
+    <div style="font-size: 11px; color: var(--muted); margin-top: 8px;">⚠ Truncated to {{ "{:,}".format(preview_raw.shown_length) }} chars (full: {{ "{:,}".format(preview_raw.full_length) }})</div>
+    {% endif %}
+  </div>
+
+  {% if doc.representation_type == 'synthesized' %}
+  <div id="tab-synthesized" class="tab-content">
+    <div class="preview-box">{{ preview_synthesized.content if preview_synthesized and preview_synthesized.content else '(no synthesized content)' }}</div>
+    {% if preview_synthesized and preview_synthesized.truncated %}
+    <div style="font-size: 11px; color: var(--muted); margin-top: 8px;">⚠ Truncated to {{ "{:,}".format(preview_synthesized.shown_length) }} chars (full: {{ "{:,}".format(preview_synthesized.full_length) }})</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- =========================
+     DOWNLOAD STORED REPRESENTATIONS
+     ========================= -->
+<div class="section">
+  <h3 style="margin-bottom: 4px;">Download Stored Representation</h3>
+  <div class="info-note">
+    These downloads contain text extracted during ingest, not the original file (PDF/DOCX/etc).
+  </div>
+  <div class="download-actions">
+    <a href="/api/v1/admin/documents/{{ doc.id }}/download?view=cleaned&format=txt{% if _tid %}&tenant_id={{ _tid }}{% endif %}" class="btn" style="font-size: 12px;">📄 Cleaned TXT</a>
+    <a href="/api/v1/admin/documents/{{ doc.id }}/download?view=raw&format=txt{% if _tid %}&tenant_id={{ _tid }}{% endif %}" class="btn" style="font-size: 12px;">📄 Raw TXT</a>
+    {% if doc.representation_type == 'synthesized' %}
+    <a href="/api/v1/admin/documents/{{ doc.id }}/download?view=synthesized&format=md{% if _tid %}&tenant_id={{ _tid }}{% endif %}" class="btn" style="font-size: 12px;">📝 Synthesized MD</a>
+    {% endif %}
+    <a href="/api/v1/admin/documents/{{ doc.id }}/download?view=cleaned&format=json{% if _tid %}&tenant_id={{ _tid }}{% endif %}" class="btn" style="font-size: 12px;">📋 Export JSON</a>
+  </div>
+</div>
+
+<!-- =========================
+     HISTORY TIMELINE
+     ========================= -->
+<div class="section">
+  <h3 style="margin-bottom: 12px;">History</h3>
+
+  {% if events %}
+  <div class="timeline">
+    {% for e in events %}
+    <div class="timeline-item">
+      <div class="flex flex-between">
+        <span class="timeline-type">{{ e.event_type }}</span>
+        <span class="timeline-time">{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S') if e.created_at else '' }}</span>
+      </div>
+      {% if e.from_status or e.to_status %}
+      <div class="timeline-msg">
+        {% if e.from_status %}{{ e.from_status }}{% endif %}
+        {% if e.from_status and e.to_status %} → {% endif %}
+        {% if e.to_status %}{{ e.to_status }}{% endif %}
+      </div>
+      {% endif %}
+      {% if e.message %}
+      <div class="timeline-msg" style="color: var(--muted);">{{ e.message }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div style="color: var(--muted); font-size: 13px; padding: 16px;">
+    No history events recorded yet.
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function switchTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-tab') === tabName);
+    });
+    document.querySelectorAll('.tab-content').forEach(function(tab) {
+      tab.classList.toggle('active', tab.id === 'tab-' + tabName);
+    });
+  }
+</script>
+{% endblock %}
