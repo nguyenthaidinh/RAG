@@ -376,73 +376,10 @@ async def resolve_user_access_context(
     tenant_id: str,
     user_id: int | str,
 ) -> UserAccessContext:
-    """Resolve a full UserAccessContext from system context.
+    """Resolve UserAccessContext for the current user.
 
-    Attempts to load user context from the registered system context
-    connector to obtain role_codes and permissions (scopes).
-
-    Fail-safe: if system context is unavailable, returns a context
-    with only user_id populated.  This means:
-      - allow/deny user_id checks still work
-      - role/permission checks fail-closed (no roles/perms → deny)
-
-    This function is designed to be called once per query request.
+    CTDT fork: system context connector removed.
+    Returns context with user_id only — sufficient for single-tenant use.
+    Role/permission-based document ACL is not used in this deployment.
     """
-    base = UserAccessContext.from_query_caller(user_id=user_id)
-
-    try:
-        from app.services.system_context.connector_registry import (
-            get_connector_registry,
-        )
-
-        registry = get_connector_registry()
-        connector = registry.get_default()
-        if connector is None:
-            logger.debug(
-                "document_acl.user_context no_default_connector "
-                "user_id=%s — roles/permissions unavailable",
-                user_id,
-            )
-            return base
-
-        user_ctx = await connector.get_user_context(
-            tenant_id=tenant_id,
-            actor_user_id=user_id,
-        )
-
-        if user_ctx is None:
-            logger.debug(
-                "document_acl.user_context user_not_found "
-                "user_id=%s tenant_id=%s",
-                user_id, tenant_id,
-            )
-            return base
-
-        role_codes = tuple(user_ctx.roles) if user_ctx.roles else ()
-        permissions = tuple(user_ctx.scopes) if user_ctx.scopes else ()
-
-        # Include the primary role if present and not already in roles
-        if user_ctx.role and user_ctx.role not in role_codes:
-            role_codes = (user_ctx.role,) + role_codes
-
-        resolved = UserAccessContext(
-            user_id=str(user_id),
-            role_codes=role_codes,
-            permissions=permissions,
-        )
-
-        logger.debug(
-            "document_acl.user_context resolved "
-            "user_id=%s roles=%d permissions=%d",
-            user_id, len(role_codes), len(permissions),
-        )
-        return resolved
-
-    except Exception:
-        logger.warning(
-            "document_acl.user_context_failed "
-            "user_id=%s tenant_id=%s — falling back to user_id only",
-            user_id, tenant_id,
-            exc_info=True,
-        )
-        return base
+    return UserAccessContext.from_query_caller(user_id=user_id)

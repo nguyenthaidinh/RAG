@@ -117,11 +117,6 @@ class Settings(BaseSettings):
     DOCUMENT_INGEST_MODE: str = "legacy"   # legacy | semantic
     DOCUMENT_INGEST_ALLOW_OVERRIDE: bool = True
 
-    # ── File-Service callback sync ─────────────────────────────────
-    FILE_SERVICE_CALLBACK_ENABLED: bool = True
-    FILE_SERVICE_INTERNAL_TOKEN: str = ""
-    FILE_SERVICE_CALLBACK_TIMEOUT_S: float = 8.0
-
     # ── Moodle Integration (CTDT) ─────────────────────────────────
     MOODLE_BASE_URL: str = ""
     MOODLE_WSTOKEN: str = ""

@@ -421,39 +421,8 @@ async def dashboard_api_keys(
 # USAGE
 # =========================
 @router.get("/dashboard/usage", response_class=HTMLResponse)
-async def dashboard_usage(
-    request: Request,
-    from_date: str | None = None,
-    to_date: str | None = None,
-    mode: str | None = None,
-    tenant_id: str | None = None,
-    user_id: int | None = None,
-    page: int = 1,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    return templates.TemplateResponse(
-        "dashboard/usage.html",
-        {
-            "request": request,
-            "user": admin,
-            "summary": None,
-            "query_items": [],
-            "query_total": 0,
-            "query_summary": {"total_queries": 0, "total_tokens": 0, "avg_latency_ms": 0},
-            "query_page": page,
-            "query_total_pages": 1,
-            "filter_from": from_date or "",
-            "filter_to": to_date or "",
-            "filter_mode": mode or "",
-            "filter_tenant": tenant_id or "",
-            "filter_user": user_id or "",
-        },
-    )
+async def dashboard_usage(request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # =========================
@@ -559,193 +528,32 @@ async def dashboard_audit(
 # TENANTS LIST (system_admin only)
 # =========================
 @router.get("/dashboard/tenants", response_class=HTMLResponse)
-async def dashboard_tenants(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    if not is_system_admin(admin.get("role", "")):
-        raise HTTPException(status_code=403, detail="System admin access required")
-
-    from app.db.models.tenant import Tenant
-    from sqlalchemy import select as sa_select
-
-    res = await db.execute(sa_select(Tenant).order_by(Tenant.created_at.desc()))
-    tenants = res.scalars().all()
-
-    return templates.TemplateResponse(
-        "dashboard/tenants.html",
-        {
-            "request": request,
-            "user": admin,
-            "tenants": tenants,
-        },
-    )
+async def dashboard_tenants(request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # =========================
 # NEW TENANT (FORM)
 # =========================
 @router.get("/dashboard/tenants/new", response_class=HTMLResponse)
-async def dashboard_tenant_new(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    if not is_system_admin(admin.get("role", "")):
-        raise HTTPException(status_code=403)
-
-    return templates.TemplateResponse(
-        "dashboard/tenant_new.html",
-        {
-            "request": request,
-            "user": admin,
-            "error": None,
-            "form_data": None,
-        },
-    )
+async def dashboard_tenant_new(request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # =========================
 # CREATE TENANT (POST) — CSRF-protected
 # =========================
 @router.post("/dashboard/tenants/new", response_class=HTMLResponse)
-async def dashboard_tenant_create(
-    request: Request,
-    tenant_id: str = Form(""),
-    name: str = Form(""),
-    max_users: int = Form(10),
-    max_requests: int = Form(10_000),
-    max_tokens: int = Form(10_000_000),
-    max_storage_mb: int = Form(1024),
-    csrf_token: str = Form(""),
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    if not is_system_admin(admin.get("role", "")):
-        raise HTTPException(status_code=403)
-
-    validate_csrf(request, csrf_token)
-
-    form_data = {
-        "tenant_id": tenant_id,
-        "name": name,
-        "max_users": max_users,
-        "max_requests": max_requests,
-        "max_tokens": max_tokens,
-        "max_storage_mb": max_storage_mb,
-    }
-
-    # Validate
-    tid = tenant_id.strip().lower()
-    if not tid or len(tid) < 3:
-        return templates.TemplateResponse(
-            "dashboard/tenant_new.html",
-            {"request": request, "user": admin, "error": "Tenant ID must be at least 3 characters", "form_data": form_data},
-            status_code=400,
-        )
-
-    if not name.strip():
-        return templates.TemplateResponse(
-            "dashboard/tenant_new.html",
-            {"request": request, "user": admin, "error": "Tenant name is required", "form_data": form_data},
-            status_code=400,
-        )
-
-    from app.db.models.tenant import Tenant
-    from sqlalchemy import select as sa_select
-
-    # Check duplicate
-    existing = await db.execute(sa_select(Tenant).where(Tenant.id == tid))
-    if existing.scalar_one_or_none():
-        return templates.TemplateResponse(
-            "dashboard/tenant_new.html",
-            {"request": request, "user": admin, "error": f"Tenant '{tid}' already exists", "form_data": form_data},
-            status_code=409,
-        )
-
-    try:
-        tenant = Tenant(
-            id=tid,
-            name=name.strip(),
-            is_active=True,
-            max_users=max_users,
-        )
-        db.add(tenant)
-        await db.flush()
-        await db.commit()
-
-        return RedirectResponse("/dashboard/tenants", status_code=303)
-
-    except Exception as e:
-        await db.rollback()
-        return templates.TemplateResponse(
-            "dashboard/tenant_new.html",
-            {"request": request, "user": admin, "error": f"Failed to create tenant: {str(e)[:200]}", "form_data": form_data},
-            status_code=500,
-        )
+async def dashboard_tenant_create(request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # =========================
 # TENANT DETAIL
 # =========================
 @router.get("/dashboard/tenants/{tenant_id}", response_class=HTMLResponse)
-async def dashboard_tenant_detail(
-    request: Request,
-    tenant_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    if not is_system_admin(admin.get("role", "")):
-        raise HTTPException(status_code=403)
-
-    from app.db.models.tenant import Tenant
-    from app.db.models.user import User
-    from sqlalchemy import select as sa_select, func
-
-    tenant = (
-        await db.execute(sa_select(Tenant).where(Tenant.id == tenant_id))
-    ).scalar_one_or_none()
-
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-
-    # Get users in this tenant
-    users_res = await db.execute(
-        sa_select(User)
-        .where(User.tenant_id == tenant_id)
-        .order_by(User.created_at.desc())
-    )
-    users = users_res.scalars().all()
-
-    user_count = len(users)
-
-    return templates.TemplateResponse(
-        "dashboard/tenant_detail.html",
-        {
-            "request": request,
-            "user": admin,
-            "tenant": tenant,
-            "users": users,
-            "user_count": user_count,
-        },
-    )
+async def dashboard_tenant_detail(tenant_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # =========================
@@ -1030,25 +838,8 @@ async def dashboard_resynthesize(
 # OPS DASHBOARD — Phase 8.0
 # =========================
 @router.get("/dashboard/ops", response_class=HTMLResponse)
-async def dashboard_ops(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        admin = await get_admin_user_from_cookie(request, db)
-    except Exception:
-        return RedirectResponse("/login")
-
-    if not is_admin(admin.get("role", "")):
-        raise HTTPException(status_code=403)
-
-    return templates.TemplateResponse(
-        "dashboard/ops.html",
-        {
-            "request": request,
-            "user": admin,
-        },
-    )
+async def dashboard_ops(request: Request, db: AsyncSession = Depends(get_db)):
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 
