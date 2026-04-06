@@ -1,1 +1,0 @@
-"""System context connector package."""

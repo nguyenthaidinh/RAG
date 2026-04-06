@@ -19,7 +19,6 @@ from sqlalchemy import BigInteger, Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.document import Document
-from app.db.models.document_event import DocumentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -178,19 +177,9 @@ class DocumentAdminRepo:
         document_id: int,
         tenant_id: str,
         limit: int = 50,
-    ) -> list[DocumentEvent]:
-        """List events for a document, newest first."""
-        stmt = (
-            select(DocumentEvent)
-            .where(
-                DocumentEvent.document_id == document_id,
-                DocumentEvent.tenant_id == tenant_id,
-            )
-            .order_by(DocumentEvent.created_at.desc())
-            .limit(limit)
-        )
-        result = await db.execute(stmt)
-        return list(result.scalars().all())
+    ) -> list:
+        """Document events removed in CTDT fork — returns empty list."""
+        return []
 
     async def get_distinct_sources(
         self,

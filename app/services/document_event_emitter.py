@@ -18,8 +18,6 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.document_event import DocumentEvent
-
 logger = logging.getLogger(__name__)
 
 # ── Event type constants ──────────────────────────────────────────────
@@ -101,27 +99,11 @@ async def emit_document_event(
     Always fail-open — errors are caught and logged as warnings.
     Never raises.
     """
-    try:
-        event = DocumentEvent(
-            id=uuid.uuid4(),
-            tenant_id=tenant_id,
-            document_id=document_id,
-            event_type=event_type,
-            from_status=from_status,
-            to_status=to_status,
-            actor_user_id=actor_user_id,
-            request_id=request_id,
-            message=message,
-            metadata_json=_sanitize_metadata(metadata_json),
-        )
-        db.add(event)
-        await db.flush()
-    except Exception:
-        logger.warning(
-            "document_event.emit_failed tenant_id=%s doc_id=%s event_type=%s",
-            tenant_id, document_id, event_type,
-            exc_info=True,
-        )
+    # DocumentEvent model removed in CTDT fork — events are logged only
+    logger.debug(
+        "document_event tenant_id=%s doc_id=%s event_type=%s from=%s to=%s",
+        tenant_id, document_id, event_type, from_status, to_status,
+    )
 
 
 async def emit_document_event_standalone(

@@ -16,12 +16,10 @@ import hashlib
 import logging
 import uuid
 
-from app.core.config import settings
 from app.db.models.query_usage import QueryUsage
 from app.nlp import get_tokenizer
-from app.nlp.types import Chunk, Tokenizer
+from app.nlp.types import Tokenizer
 from app.repos.query_usage_repo import QueryUsageRepository
-from app.services.token_ledger import TokenLedgerService
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +33,15 @@ class QueryUsageService:
     exactly one ``query_usages`` row and exactly one billing entry.
     """
 
-    __slots__ = ("_repo", "_ledger", "_tokenizer")
+    __slots__ = ("_repo", "_tokenizer")
 
     def __init__(
         self,
         *,
         repo: QueryUsageRepository,
-        ledger: TokenLedgerService,
         tokenizer: Tokenizer | None = None,
     ) -> None:
         self._repo = repo
-        self._ledger = ledger
         self._tokenizer = tokenizer or get_tokenizer()
 
     # ── public API ────────────────────────────────────────────────────
@@ -105,26 +101,6 @@ class QueryUsageService:
 
         # 4. Insert usage record (idempotent via unique constraint)
         record, was_inserted = await self._repo.insert_if_absent(usage=usage)
-
-        # 5. Write billing via TokenLedgerService (always attempt —
-        #    the ledger's own idempotency guard prevents double-writes).
-        if settings.QUERY_BILLING_ENABLED:
-            billing_key = f"query:{tenant_id}:{idempotency_key}"
-            billing_chunk = Chunk(
-                chunk_index=0,
-                text="",  # NEVER store raw query text
-                token_count=tokens_total,
-                content_hash=query_hash,
-                tenant_id=tenant_id,
-                document_id=0,  # sentinel: query, not a document
-                version_id=billing_key,
-            )
-            await self._ledger.record_chunk_usage(
-                tenant_id=tenant_id,
-                document_id=0,
-                version_id=billing_key,
-                chunks=[billing_chunk],
-            )
 
         if was_inserted:
             logger.info(

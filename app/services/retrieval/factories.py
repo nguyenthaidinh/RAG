@@ -197,34 +197,18 @@ def get_query_rewriter():
 # ─────────────────────────────────────────────────────────────
 
 def get_query_usage_service():
-    """
-    Wire QueryUsageService (idempotency + quota + token ledger).
-
-    IMPORTANT:
-    - ImportError → degrade gracefully
-    - Runtime DB errors → RAISE (billing must not silently disable)
-    """
-
+    """Wire QueryUsageService for query tracking."""
     try:
         from app.repos.query_usage_repo import PgQueryUsageRepository
         from app.services.query_usage_service import QueryUsageService
-        from app.services.token_ledger import get_token_ledger
-
-    except ImportError as exc:
+        repo = PgQueryUsageRepository()
+        return QueryUsageService(repo=repo)
+    except Exception as exc:
         logger.warning(
-            "retrieval.factory query_usage_import_error reason=%s disabled",
+            "retrieval.factory query_usage_init_error reason=%s disabled",
             type(exc).__name__,
         )
         return None
-
-    # Runtime errors should NOT be swallowed silently
-    repo = PgQueryUsageRepository()
-    ledger = get_token_ledger()
-
-    return QueryUsageService(
-        repo=repo,
-        ledger=ledger,
-    )
 
 
 # ─────────────────────────────────────────────────────────────

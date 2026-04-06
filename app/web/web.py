@@ -13,15 +13,8 @@ from app.web.admin_helpers import get_admin_user_from_cookie
 from app.web.csrf import validate_csrf
 from app.web.i18n import get_translator, DEFAULT_LANG, SUPPORTED_LANGS
 from app.services.admin_user_service import AdminUserService
-from app.services.admin_api_key_service import AdminAPIKeyService
-from app.services.admin_usage_service import AdminUsageService
-from app.services.query_analytics_service import QueryAnalyticsService
-from app.services.quota_service import QuotaService
 from app.services.api_key_service import APIKeyService
-from app.services.quota_policy_service import QuotaPolicyService
 from app.services.user_service import UserService
-from app.repos.plan_repo import PlanRepository
-from app.repos.tenant_setting_repo import TenantSettingRepository
 from app.db.session import get_db
 from app.core.rbac import is_admin, is_system_admin
 
@@ -163,20 +156,12 @@ async def dashboard(
     # Security: NEVER read access_token from cookie into template context.
     # Auth relies solely on HttpOnly cookie — no token exposure to Jinja/JS.
 
-    # Query analytics KPIs
-    qa_svc = QueryAnalyticsService()
-    tenant_scope = None if is_system_admin(user.get("role", "")) else user.get("tenant_id")
-    try:
-        query_kpis = await qa_svc.get_dashboard_kpis(db, tenant_id=tenant_scope)
-    except Exception:
-        query_kpis = None
-
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "user": user,
-            "query_kpis": query_kpis,
+            "query_kpis": None,
         },
     )
 
@@ -389,22 +374,7 @@ async def dashboard_user_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="User not found")
 
-    quota = await QuotaService.get_by_user_id(db, user_id)
     api_keys = await APIKeyService.list_by_user_id(db, user_id)
-
-    # Query analytics for this user (Phase 4.2)
-    qa_svc = QueryAnalyticsService()
-    try:
-        from datetime import datetime as _dt, timedelta, timezone as _tz
-        _now = _dt.now(_tz.utc)
-        user_query_stats = await qa_svc._repo.summary(
-            db,
-            from_dt=_now - timedelta(days=7),
-            to_dt=_now,
-            user_id=user_id,
-        )
-    except Exception:
-        user_query_stats = None
 
     return templates.TemplateResponse(
         "dashboard/user_detail.html",
@@ -412,10 +382,10 @@ async def dashboard_user_detail(
             "request": request,
             "user": admin,
             "target_user": detail["user"],
-            "quota": quota,
+            "quota": None,
             "api_keys": api_keys,
             "recent_usage": detail["recent_usage"][:20],
-            "user_query_stats": user_query_stats,
+            "user_query_stats": None,
         },
     )
 
@@ -434,7 +404,7 @@ async def dashboard_api_keys(
     except Exception:
         return RedirectResponse("/login")
 
-    keys = await AdminAPIKeyService.list_api_keys(db, user_id=user_id)
+    keys = await APIKeyService.list_by_user_id(db, user_id) if user_id else []
 
     return templates.TemplateResponse(
         "dashboard/api_keys.html",
@@ -466,68 +436,17 @@ async def dashboard_usage(
     except Exception:
         return RedirectResponse("/login")
 
-    summary = await AdminUsageService.get_usage_summary(db)
-
-    # ── Query usage (Phase 4.2) ──
-    from datetime import datetime as _dt, timezone as _tz
-
-    qa_svc = QueryAnalyticsService()
-    qa_from = None
-    qa_to = None
-    if from_date:
-        try:
-            qa_from = _dt.fromisoformat(from_date)
-            # Security: never pass naive datetimes into DB queries
-            if qa_from.tzinfo is None:
-                qa_from = qa_from.replace(tzinfo=_tz.utc)
-        except ValueError:
-            pass
-    if to_date:
-        try:
-            qa_to = _dt.fromisoformat(to_date)
-            if qa_to.tzinfo is None:
-                qa_to = qa_to.replace(tzinfo=_tz.utc)
-        except ValueError:
-            pass
-
-    # Tenant scoping
-    qa_tenant = tenant_id
-    if not is_system_admin(admin.get("role", "")):
-        qa_tenant = admin.get("tenant_id")
-
-    page_size = 50
-    offset = (page - 1) * page_size
-
-    try:
-        query_page = await qa_svc.get_query_usage_page(
-            db,
-            from_dt=qa_from,
-            to_dt=qa_to,
-            tenant_id=qa_tenant,
-            user_id=user_id,
-            mode=mode if mode else None,
-            limit=page_size,
-            offset=offset,
-        )
-    except Exception:
-        query_page = {"items": [], "total": 0, "summary": {"total_queries": 0, "total_tokens": 0, "avg_latency_ms": 0}}
-
-    import math
-    total_pages = max(1, math.ceil(query_page["total"] / page_size))
-
     return templates.TemplateResponse(
         "dashboard/usage.html",
         {
             "request": request,
             "user": admin,
-            "summary": summary,
-            # Phase 4.2 query usage data
-            "query_items": query_page["items"],
-            "query_total": query_page["total"],
-            "query_summary": query_page["summary"],
+            "summary": None,
+            "query_items": [],
+            "query_total": 0,
+            "query_summary": {"total_queries": 0, "total_tokens": 0, "avg_latency_ms": 0},
             "query_page": page,
-            "query_total_pages": total_pages,
-            # Preserve filter state
+            "query_total_pages": 1,
             "filter_from": from_date or "",
             "filter_to": to_date or "",
             "filter_mode": mode or "",
@@ -766,16 +685,6 @@ async def dashboard_tenant_create(
         )
         db.add(tenant)
         await db.flush()
-
-        # Create tenant quota
-        await QuotaService.create_tenant_quota(
-            db,
-            tenant_id=tid,
-            max_requests=max_requests,
-            max_tokens=max_tokens,
-            max_storage_mb=max_storage_mb,
-        )
-
         await db.commit()
 
         return RedirectResponse("/dashboard/tenants", status_code=303)
@@ -1158,45 +1067,16 @@ async def dashboard_settings(
 
     tenant_id = admin.get("tenant_id", "default")
 
-    # Get tenant settings
-    setting_repo = TenantSettingRepository()
-    setting = await setting_repo.get(db, tenant_id)
-
-    tenant_setting = {
-        "plan_code": setting.plan_code if setting else "free",
-        "quota_overrides_json": setting.quota_overrides_json if setting else None,
-        "enforce_user_rate_limit": setting.enforce_user_rate_limit if setting else False,
-    }
-
-    # Resolve effective policy
-    policy_svc = QuotaPolicyService()
-    policy = await policy_svc.get_effective_policy(db, tenant_id)
-
-    # Get all plans
-    plan_repo = PlanRepository()
-    plans = await plan_repo.list_all(db)
-    plans_list = [{"code": p.code, "name": p.name} for p in plans]
-
-    import json
-    overrides_display = ""
-    if tenant_setting["quota_overrides_json"]:
-        overrides_display = json.dumps(tenant_setting["quota_overrides_json"], indent=2)
-
     return templates.TemplateResponse(
         "dashboard/settings.html",
         {
             "request": request,
             "user": admin,
             "tenant_id": tenant_id,
-            "tenant_setting": tenant_setting,
-            "policy": {
-                "per_minute": policy.per_minute,
-                "burst": policy.burst,
-                "token_daily": policy.token_daily,
-                "token_monthly": policy.token_monthly,
-            },
-            "plans": plans_list,
-            "quota_overrides_display": overrides_display,
+            "tenant_setting": {"plan_code": "ctdt", "quota_overrides_json": None, "enforce_user_rate_limit": False},
+            "policy": {"per_minute": 0, "burst": 0, "token_daily": 0, "token_monthly": 0},
+            "plans": [],
+            "quota_overrides_display": "",
         },
     )
 

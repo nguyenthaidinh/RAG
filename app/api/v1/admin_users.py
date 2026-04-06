@@ -5,7 +5,6 @@ from app.db.session import get_db
 from app.core.auth_deps import require_admin, require_system_admin
 from app.db.models.user import User
 from app.services.user_service import UserService
-from app.services.quota_service import QuotaService
 from app.services.admin_user_service import AdminUserService
 from app.core.rbac import VALID_ROLES, is_system_admin
 from datetime import datetime

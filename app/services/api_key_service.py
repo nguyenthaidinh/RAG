@@ -107,20 +107,25 @@ class APIKeyService:
         if not old_key:
             return None
 
-        from app.services.admin_api_key_service import AdminAPIKeyService
-
         # Atomic: revoke + create inside a single savepoint
         async with db.begin_nested():
             old_key.revoked_at = datetime.now(timezone.utc)
             old_key.is_active = False
 
-            new_key, full_key = await AdminAPIKeyService.create_api_key(
-                db,
+            # Inline key creation (prefix.secret format)
+            raw_secret = secrets.token_urlsafe(32)
+            prefix = f"ak_live_{secrets.token_hex(8)}"
+            new_key = APIKey(
                 user_id=old_key.user_id,
                 tenant_id=old_key.tenant_id,
                 name=f"{old_key.name} (rotated)",
-                actor_user_id=actor_user_id,
+                prefix=prefix,
+                secret_hash=hash_password(raw_secret),
+                is_active=True,
             )
+            db.add(new_key)
+            await db.flush()
+            full_key = f"{prefix}.{raw_secret}"
 
         audit_log(
             action="api_key.rotate",

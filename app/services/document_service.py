@@ -23,7 +23,6 @@ from app.services.document_lifecycle import (
     validate_transition,
 )
 from app.services.exceptions import QuotaExceededError
-from app.services.token_ledger import TokenLedgerService, get_token_ledger
 from app.services.vector_index import NullIndex, PgVectorIndex, VectorIndex
 
 logger = logging.getLogger(__name__)
@@ -42,20 +41,12 @@ class DocumentService:
         self,
         repo: DocumentRepo | None = None,
         *,
-        ledger: TokenLedgerService | None = None,
         embedding_provider=None,
         vector_index: VectorIndex | None = None,
     ):
         self.repo = repo or DocumentRepo()
-        self._ledger = ledger
         self._embedding_provider = embedding_provider
         self._vector_index = vector_index
-
-    @property
-    def ledger(self) -> TokenLedgerService:
-        if self._ledger is None:
-            self._ledger = get_token_ledger()
-        return self._ledger
 
     @property
     def embedding_provider(self):
@@ -382,13 +373,6 @@ class DocumentService:
             )
             doc.content_text = cleaned
 
-            await self.ledger.record_chunk_usage(
-                tenant_id=tenant_id,
-                document_id=doc.id,
-                version_id=checksum,
-                chunks=chunks,
-            )
-
             old_status = doc.status
             validate_transition(doc.status, CHUNKED)
             doc.status = CHUNKED
@@ -509,13 +493,6 @@ class DocumentService:
             version_id=checksum,
         )
         doc.content_text = cleaned
-
-        await self.ledger.record_chunk_usage(
-            tenant_id=tenant_id,
-            document_id=doc.id,
-            version_id=checksum,
-            chunks=chunks,
-        )
 
         old_status = doc.status
         if doc.status != CHUNKED:

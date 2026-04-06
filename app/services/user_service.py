@@ -2,7 +2,6 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.user import User
 from app.db.models.tenant import Tenant
-from app.db.models.quota import UserQuota
 from app.core.security import hash_password
 from app.core.rbac import validate_role
 
@@ -82,19 +81,6 @@ class UserService:
         )
         db.add(user)
         await db.flush()
-
-        # Create initial quota
-        quota = UserQuota(
-            user_id=user.id,
-            plan="free",
-            is_active=True,
-            max_tokens=1000000,
-            max_requests=1000,
-            max_storage_mb=100,
-        )
-        db.add(quota)
-        await db.flush()
-
         return user
 
     @staticmethod

@@ -12,7 +12,6 @@ from app.core.rbac import (
 )
 from app.core.security import hash_password
 from app.db.models.api_key import APIKey
-from app.db.models.quota import UserQuota
 from app.db.models.tenant import Tenant
 from app.db.models.usage import UsageLedger
 from app.db.models.user import User
@@ -152,14 +151,6 @@ class AdminUserService:
         db.add(user)
         await db.flush()  # get user.id
 
-        quota = UserQuota(
-            user_id=user.id,
-            max_tokens=DEFAULT_QUOTA["max_tokens"],
-            max_requests=DEFAULT_QUOTA["max_requests"],
-            max_storage_mb=DEFAULT_QUOTA["max_storage_mb"],
-        )
-        db.add(quota)
-
         # ✅ Privacy-safe audit (no raw email in logs)
         audit_log(
             action="user.create",
@@ -190,8 +181,6 @@ class AdminUserService:
             if user.tenant_id != actor.tenant_id:
                 return None
 
-        quota = (await db.execute(select(UserQuota).where(UserQuota.user_id == user_id))).scalar_one_or_none()
-
         api_keys_count = (
             await db.execute(select(func.count(APIKey.id)).where(APIKey.user_id == user_id))
         ).scalar_one() or 0
@@ -207,7 +196,6 @@ class AdminUserService:
 
         return {
             "user": user,
-            "quota": quota,
             "api_keys_count": api_keys_count,
             "recent_usage": list(recent_usage),
         }

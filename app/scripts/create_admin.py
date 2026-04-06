@@ -5,7 +5,6 @@ from sqlalchemy import select
 from app.db.session import AsyncSessionLocal
 from app.db.models.user import User
 from app.db.models.tenant import Tenant
-from app.db.models.tenant_quota import TenantQuota
 from app.core.security import hash_password
 from app.core.rbac import ROLE_SYSTEM_ADMIN
 
@@ -37,23 +36,6 @@ async def ensure_default_tenant(session) -> Tenant:
         session.add(tenant)
         await session.flush()
         print(f"✅ Created default tenant: {DEFAULT_TENANT_ID}")
-
-    tq_result = await session.execute(
-        select(TenantQuota).where(TenantQuota.tenant_id == DEFAULT_TENANT_ID)
-    )
-    tq = tq_result.scalar_one_or_none()
-    if not tq:
-        tq = TenantQuota(
-            tenant_id=DEFAULT_TENANT_ID,
-            plan="unlimited",
-            is_active=True,
-            max_requests=-1,
-            max_tokens=-1,
-            max_storage_mb=-1,
-        )
-        session.add(tq)
-        await session.flush()
-        print(f"✅ Created tenant quota for '{DEFAULT_TENANT_ID}'")
 
     return tenant
 
