@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+
+{% block title %}RAG Settings / Health | AI Server{% endblock %}
+{% block page_title %}RAG Settings / Health{% endblock %}
+
+{% block content %}
+
+<div class="rag-page-header">
+  <div>
+    <h1>RAG Settings / Health</h1>
+    <p>Theo dõi cấu hình runtime, provider, vector index và trạng thái tích hợp</p>
+  </div>
+  <span class="badge badge-primary">Phase R6.4-UI-4</span>
+</div>
+
+<div class="cards">
+  {% for metric in metrics %}
+  <div class="card {{ metric.variant }}">
+    <h3>{{ metric.label }}</h3>
+    <p class="stat-number">{{ metric.value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>Runtime configuration</h2>
+  <div class="table-container rag-settings-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in runtime_config %}
+        <tr>
+          <td class="mono">{{ item.key }}</td>
+          <td>{{ item.value }}</td>
+          <td>{{ item.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="rag-settings-grid">
+  <div class="section">
+    <h2>Provider health</h2>
+    <div class="rag-settings-panel">
+      {% for item in provider_health %}
+      <div class="rag-settings-row">
+        <div>
+          <strong>{{ item.name }}</strong>
+          <span>{{ item.details }}</span>
+        </div>
+        <span class="badge {{ item.badge }}">{{ item.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Safe secrets</h2>
+    <div class="rag-settings-panel">
+      {% for item in safe_secrets %}
+      <div class="rag-settings-row">
+        <div>
+          <strong>{{ item.key }}</strong>
+          <span>Value is masked and never rendered.</span>
+        </div>
+        <span class="badge {{ item.badge }}">{{ item.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Integration</h2>
+  <div class="rag-settings-panel">
+    {% for note in integration_notes %}
+    <div class="rag-settings-row">
+      <div>
+        <strong>Note {{ loop.index }}</strong>
+        <span>{{ note }}</span>
+      </div>
+      <span class="badge badge-primary">Info</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="section">
+  <h2>Read-only settings</h2>
+  <div class="alert alert-warning">
+    Phase này chỉ đọc cấu hình. Chức năng lưu cấu hình sẽ được thiết kế sau khi chốt policy vận hành.
+  </div>
+
+  <form class="rag-settings-form">
+    <div class="form-row">
+      {% for item in readonly_settings %}
+      <div class="form-group">
+        <label>{{ item.label }}</label>
+        <input type="text" value="{{ item.value }}" readonly disabled />
+      </div>
+      {% endfor %}
+    </div>
+  </form>
+</div>
+
+{% endblock %}

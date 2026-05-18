@@ -141,9 +141,32 @@
             {{ t('documents') if t else 'Documents' }}
           </a>
 
+          <div class="menu-title">RAG / CTĐT</div>
+
+          <a
+            href="/dashboard/rag"
+            class="submenu-link {% if request.url.path == '/dashboard/rag' %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 2v20" />
+              <path d="M2 12h20" />
+              <path d="m4.93 4.93 14.14 14.14" />
+              <path d="m19.07 4.93-14.14 14.14" />
+            </svg>
+            RAG Center
+          </a>
+
           <a
             href="/dashboard/api-keys"
-            class="{% if request.url.path.startswith('/dashboard/api-keys') %}active{% endif %}"
+            class="submenu-link {% if request.url.path.startswith('/dashboard/api-keys') %}active{% endif %}"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -160,12 +183,33 @@
               <path d="m21 2-9.6 9.6" />
               <circle cx="7.5" cy="15.5" r="5.5" />
             </svg>
-            {{ t('api_keys') }}
+            API Keys
           </a>
 
           <a
-            href="/dashboard/usage"
-            class="{% if request.url.path.startswith('/dashboard/usage') %}active{% endif %}"
+            href="/dashboard/rag/ctdt"
+            class="submenu-link {% if request.url.path.startswith('/dashboard/rag/ctdt') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M4 7h16" />
+              <path d="M4 12h16" />
+              <path d="M4 17h10" />
+              <path d="M8 3v18" />
+            </svg>
+            CTĐT APIs
+          </a>
+
+          <a
+            href="/dashboard/rag/usage"
+            class="submenu-link {% if request.url.path.startswith('/dashboard/rag/usage') %}active{% endif %}"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -179,7 +223,28 @@
               <path d="M3 3v18h18" />
               <path d="m19 9-5 5-4-4-3 3" />
             </svg>
-            {{ t('usage') }}
+            Usage Logs
+          </a>
+
+          <a
+            href="/dashboard/rag/settings"
+            class="submenu-link {% if request.url.path.startswith('/dashboard/rag/settings') %}active{% endif %}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Settings
           </a>
 
           <a

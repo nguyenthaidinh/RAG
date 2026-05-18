@@ -2,7 +2,10 @@
 import hashlib
 import logging
 import time
+from dataclasses import asdict, dataclass
 from typing import Any
+
+from app.core.config import settings
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +29,22 @@ from app.services.exceptions import QuotaExceededError
 from app.services.vector_index import NullIndex, PgVectorIndex, VectorIndex
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DocumentPipelineStats:
+    """Stats produced by the real ingest pipeline for one upsert call."""
+
+    cleaned_text_length: int
+    chunk_count: int
+    embedding_count: int
+    indexed_count: int
+    indexed: bool
+    vector_index: str
+    embedding_provider: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class DocumentService:
@@ -90,16 +109,128 @@ class DocumentService:
         return str(value) if value else None
 
     @staticmethod
+    def _has_pipeline_stats_gap(doc: Document) -> bool:
+        """
+        Check if a READY document lacks meaningful pipeline stats.
+
+        Returns True when:
+        - No ``pipeline`` metadata AND no ``ctdt.chunk_count``
+        - ``chunk_count <= 0`` while ``content_text`` contains data
+        """
+        meta = doc.meta or {}
+        pipeline = meta.get("pipeline") or {}
+        ctdt = meta.get("ctdt") or {}
+
+        # No pipeline metadata at all and no chunk_count in ctdt
+        if not pipeline and not ctdt.get("chunk_count"):
+            return True
+
+        # chunk_count missing/zero but content exists
+        raw_cc = pipeline.get("chunk_count") if pipeline.get("chunk_count") else ctdt.get("chunk_count")
+        try:
+            chunk_count = int(raw_cc) if raw_cc is not None else 0
+        except (ValueError, TypeError):
+            chunk_count = 0
+
+        has_content = bool((doc.content_text or "").strip())
+        if chunk_count <= 0 and has_content:
+            return True
+
+        return False
+
+    @classmethod
     def _should_reprocess_content(
+        cls,
         *,
         existing_doc: Document,
         new_checksum: str,
+        metadata: dict | None = None,
     ) -> bool:
         if existing_doc.checksum != new_checksum:
             return True
         if existing_doc.status != READY:
             return True
+        # Force reprocess for CTĐT legacy docs missing pipeline stats
+        if metadata and isinstance(metadata, dict):
+            system = metadata.get("system") or {}
+            if system.get("force_reprocess_if_pipeline_stats_missing"):
+                if cls._has_pipeline_stats_gap(existing_doc):
+                    logger.info(
+                        "document.force_reprocess_stats_missing doc_id=%s",
+                        existing_doc.id,
+                    )
+                    return True
         return False
+
+    @staticmethod
+    def _configured_vector_index_name() -> str:
+        name = (getattr(settings, "VECTOR_INDEX", "null") or "null").lower().strip()
+        if name not in {"null", "pgvector", "qdrant", "faiss"}:
+            return "null"
+        return name
+
+    @staticmethod
+    def _configured_embedding_provider_name() -> str:
+        return (getattr(settings, "EMBEDDING_PROVIDER", "local") or "local").lower().strip()
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return default
+
+    @classmethod
+    def _stats_from_existing_doc(cls, doc: Document) -> DocumentPipelineStats:
+        """
+        Return persisted stats for a document that does not need reprocessing.
+
+        This intentionally does not re-clean or re-chunk. If older metadata
+        lacks some counters, unknown counts stay at 0 rather than inventing
+        estimates in the service layer.
+        """
+        meta = doc.meta or {}
+        pipeline = meta.get("pipeline") or {}
+        ctdt = meta.get("ctdt") or {}
+
+        vector_index = str(
+            pipeline.get("vector_index") or cls._configured_vector_index_name()
+        ).lower()
+        embedding_provider = str(
+            pipeline.get("embedding_provider") or cls._configured_embedding_provider_name()
+        ).lower()
+
+        cleaned_text_length = cls._coerce_int(
+            pipeline.get("cleaned_text_length"),
+            cls._coerce_int(ctdt.get("text_length"), len(doc.content_text or "")),
+        )
+        chunk_count = cls._coerce_int(
+            pipeline.get("chunk_count"),
+            cls._coerce_int(ctdt.get("chunk_count"), 0),
+        )
+        embedding_count = cls._coerce_int(pipeline.get("embedding_count"), 0)
+        indexed_count = cls._coerce_int(pipeline.get("indexed_count"), 0)
+
+        indexed_raw = pipeline.get("indexed")
+        if indexed_raw is None:
+            indexed = vector_index != "null" and indexed_count > 0
+        else:
+            indexed = bool(indexed_raw)
+
+        if vector_index == "null":
+            embedding_count = 0
+            indexed_count = 0
+            indexed = False
+
+        return DocumentPipelineStats(
+            cleaned_text_length=cleaned_text_length,
+            chunk_count=chunk_count,
+            embedding_count=embedding_count,
+            indexed_count=indexed_count,
+            indexed=indexed,
+            vector_index=vector_index,
+            embedding_provider=embedding_provider,
+        )
 
     @staticmethod
     def _process_content(
@@ -158,11 +289,13 @@ class DocumentService:
         doc: Document,
         chunks: list,
         old_version: str | None,
-    ) -> None:
+    ) -> tuple[int, int, bool]:
         t0 = time.monotonic()
 
         try:
-            if isinstance(self.vector_index, NullIndex):
+            vector_index = self.vector_index
+
+            if isinstance(vector_index, NullIndex):
                 old_status = doc.status
                 validate_transition(doc.status, READY)
                 doc.status = READY
@@ -185,28 +318,32 @@ class DocumentService:
                     doc.checksum,
                     round((time.monotonic() - t0) * 1000, 2),
                 )
-                return
+                return 0, 0, False
 
             texts = [c.text for c in chunks]
             embeddings = await self.embedding_provider.embed(texts)
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    f"embedding count mismatch: {len(embeddings)} != {len(chunks)}"
+                )
 
             if old_version:
-                if isinstance(self.vector_index, PgVectorIndex):
-                    await self.vector_index.delete_in_tx(
+                if isinstance(vector_index, PgVectorIndex):
+                    await vector_index.delete_in_tx(
                         db,
                         tenant_id=doc.tenant_id,
                         document_id=doc.id,
                         version_id=old_version,
                     )
                 else:
-                    await self.vector_index.delete(
+                    await vector_index.delete(
                         tenant_id=doc.tenant_id,
                         document_id=doc.id,
                         version_id=old_version,
                     )
 
-            if isinstance(self.vector_index, PgVectorIndex):
-                await self.vector_index.upsert_in_tx(
+            if isinstance(vector_index, PgVectorIndex):
+                await vector_index.upsert_in_tx(
                     db,
                     tenant_id=doc.tenant_id,
                     document_id=doc.id,
@@ -215,7 +352,7 @@ class DocumentService:
                     embeddings=embeddings,
                 )
             else:
-                await self.vector_index.upsert(
+                await vector_index.upsert(
                     tenant_id=doc.tenant_id,
                     document_id=doc.id,
                     version_id=doc.checksum,
@@ -264,6 +401,8 @@ class DocumentService:
                 len(chunks),
                 elapsed_ms,
             )
+            indexed_count = len(embeddings)
+            return len(embeddings), indexed_count, indexed_count > 0
 
         except Exception:
             logger.exception(
@@ -289,6 +428,9 @@ class DocumentService:
                     )
             except Exception:
                 logger.exception("ingest.error_status_failed doc_id=%s", doc.id)
+            # Re-raise so callers know indexing failed — do NOT silently
+            # return (0, 0, False) which lets upsert() appear successful.
+            raise
 
     async def upsert(
         self,
@@ -302,7 +444,7 @@ class DocumentService:
         metadata: dict | None,
         representation_type: str = "original",
         parent_document_id: int | None = None,
-    ) -> tuple[Document, str, bool]:
+    ) -> tuple[Document, str, bool, DocumentPipelineStats]:
         title = self._normalize_title(title)
         metadata = self._normalize_metadata(metadata)
         pipeline_mode = self._get_pipeline_mode(metadata)
@@ -387,7 +529,21 @@ class DocumentService:
                 to_status=CHUNKED,
             )
 
-            await self._embed_and_index(db, doc=doc, chunks=chunks, old_version=None)
+            embedding_count, indexed_count, indexed = await self._embed_and_index(
+                db,
+                doc=doc,
+                chunks=chunks,
+                old_version=None,
+            )
+            stats = DocumentPipelineStats(
+                cleaned_text_length=len(cleaned),
+                chunk_count=len(chunks),
+                embedding_count=embedding_count,
+                indexed_count=indexed_count,
+                indexed=indexed,
+                vector_index=self._configured_vector_index_name(),
+                embedding_provider=self._configured_embedding_provider_name(),
+            )
 
             logger.info(
                 "document.upsert.created tenant_id=%s doc_id=%s external_id=%s pipeline_mode=%s",
@@ -396,13 +552,14 @@ class DocumentService:
                 external_id,
                 pipeline_mode,
             )
-            return doc, "created", True
+            return doc, "created", True, stats
 
         # ── EXISTING ─────────────────────────────────────────────
         content_changed = doc.checksum != checksum
         needs_reprocess = self._should_reprocess_content(
             existing_doc=doc,
             new_checksum=checksum,
+            metadata=metadata,
         )
 
         title_changed = (title != doc.title)
@@ -412,6 +569,18 @@ class DocumentService:
 
         # ── FAST UPDATE / NOOP: content unchanged + READY ────────
         if not needs_reprocess:
+            existing_stats = self._stats_from_existing_doc(doc)
+
+            # If stats gap exists but force_reprocess was not requested,
+            # mark pipeline_stats_missing in meta so callers are aware.
+            # Merge into *incoming* metadata so the flag survives the
+            # doc.meta = metadata assignment below.
+            if self._has_pipeline_stats_gap(doc):
+                pipeline_section = dict(metadata.get("pipeline") or {})
+                pipeline_section["pipeline_stats_missing"] = True
+                metadata = {**metadata, "pipeline": pipeline_section}
+                meta_changed = True  # ensure flush happens
+
             if title_changed:
                 doc.title = title
             if meta_changed:
@@ -456,7 +625,7 @@ class DocumentService:
                     pipeline_mode,
                     version_backfilled,
                 )
-                return doc, "updated", True
+                return doc, "updated", True, existing_stats
 
             logger.info(
                 "document.upsert.noop tenant_id=%s doc_id=%s external_id=%s pipeline_mode=%s",
@@ -465,7 +634,7 @@ class DocumentService:
                 external_id,
                 pipeline_mode,
             )
-            return doc, "noop", False
+            return doc, "noop", False, existing_stats
 
         # ── UPDATE / RETRY WITH REPROCESS ────────────────────────
         old_version: str | None = None
@@ -528,11 +697,20 @@ class DocumentService:
                 to_status=CHUNKED,
             )
 
-        await self._embed_and_index(
+        embedding_count, indexed_count, indexed = await self._embed_and_index(
             db,
             doc=doc,
             chunks=chunks,
             old_version=old_version,
+        )
+        stats = DocumentPipelineStats(
+            cleaned_text_length=len(cleaned),
+            chunk_count=len(chunks),
+            embedding_count=embedding_count,
+            indexed_count=indexed_count,
+            indexed=indexed,
+            vector_index=self._configured_vector_index_name(),
+            embedding_provider=self._configured_embedding_provider_name(),
         )
 
         logger.info(
@@ -543,6 +721,6 @@ class DocumentService:
             pipeline_mode,
             content_changed,
         )
-        return doc, "updated", True
+        return doc, "updated", True, stats
 
 

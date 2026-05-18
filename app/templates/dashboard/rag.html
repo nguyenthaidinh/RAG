@@ -1,0 +1,101 @@
+{% extends "layout.html" %}
+
+{% block title %}RAG Center | AI Server{% endblock %}
+{% block page_title %}RAG Center{% endblock %}
+
+{% block content %}
+
+<div class="rag-page-header">
+  <div>
+    <h1>RAG Center</h1>
+    <p>Quản lý AI/RAG, API Keys, truy vấn CTĐT và Mapping Draft</p>
+  </div>
+  <span class="badge badge-primary">Phase R6.4-UI-1</span>
+</div>
+
+<div class="cards">
+  {% for metric in metrics %}
+  <div class="card {{ metric.variant }}">
+    <h3>{{ metric.label }}</h3>
+    <p class="stat-number">{{ metric.value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="rag-grid">
+  <div class="section">
+    <h2>System status</h2>
+    <div class="rag-panel">
+      {% for item in system_statuses %}
+      <div class="rag-status-row">
+        <span>{{ item.label }}</span>
+        <span class="badge {{ item.badge }}">{{ item.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Quick actions</h2>
+    <div class="rag-actions">
+      {% for action in quick_actions %}
+      <a
+        href="{{ action.href }}"
+        class="rag-action {% if action.disabled %}is-disabled{% endif %}"
+        {% if action.disabled %}aria-disabled="true" tabindex="-1"{% endif %}
+      >
+        <strong>{{ action.label }}</strong>
+        <span>{{ action.description }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Recent activity</h2>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Target</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in recent_activities %}
+        <tr>
+          <td class="mono">{{ item.time }}</td>
+          <td>{{ item.actor }}</td>
+          <td>{{ item.action }}</td>
+          <td class="mono">{{ item.target }}</td>
+          <td><span class="badge {{ item.badge }}">{{ item.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h2>CTĐT endpoint summary</h2>
+  <div class="rag-endpoint-list">
+    {% for endpoint in ctdt_endpoints %}
+    <div class="rag-endpoint-row">
+      <span class="badge {% if endpoint.method == 'GET' %}badge-primary{% else %}badge-accent{% endif %}">
+        {{ endpoint.method }}
+      </span>
+      <code>{{ endpoint.path }}</code>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="alert alert-warning rag-note">
+  Phase này là UI foundation. Dữ liệu thật sẽ được nối ở các phase sau.
+</div>
+
+{% endblock %}

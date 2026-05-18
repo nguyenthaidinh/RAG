@@ -18,8 +18,8 @@ Background:
 Notes:
     - Column is nullable: existing rows get NULL, handled by fallback logic
       in DefaultVectorRetriever._extract_snippet().
-    - document_vectors is a manually-managed table (not in Base.metadata),
-      created by bootstrap_local_db.py or by this migration.
+    - Historical migration from before document_vectors was Alembic-managed.
+      A later migration now creates the table as source of truth.
     - Uses IF NOT EXISTS / IF EXISTS for fail-safe deploy on any env state.
 """
 from typing import Sequence, Union
@@ -38,22 +38,34 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add chunk_text column to document_vectors if table exists."""
 
-    # document_vectors is created by bootstrap_local_db.py, not by Alembic.
-    # In environments where the table already exists (production, staging),
-    # we just add the column.  IF NOT EXISTS ensures idempotency.
+    # Historical migration from before document_vectors was Alembic-managed.
+    # If the table already exists, add the column idempotently.
     #
-    # In environments where bootstrap hasn't run yet, this is a no-op
-    # (the table doesn't exist, so ALTER TABLE does nothing harmful —
-    # bootstrap_local_db.py will create the full table with chunk_text).
+    # If the table does not exist, this is a no-op; the later
+    # source-of-truth migration creates the full table.
     op.execute(sa.text(
-        "ALTER TABLE document_vectors "
-        "ADD COLUMN IF NOT EXISTS chunk_text TEXT"
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.document_vectors') IS NOT NULL THEN
+                ALTER TABLE document_vectors
+                ADD COLUMN IF NOT EXISTS chunk_text TEXT;
+            END IF;
+        END $$;
+        """
     ))
 
 
 def downgrade() -> None:
     """Remove chunk_text column from document_vectors."""
     op.execute(sa.text(
-        "ALTER TABLE document_vectors "
-        "DROP COLUMN IF EXISTS chunk_text"
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.document_vectors') IS NOT NULL THEN
+                ALTER TABLE document_vectors
+                DROP COLUMN IF EXISTS chunk_text;
+            END IF;
+        END $$;
+        """
     ))

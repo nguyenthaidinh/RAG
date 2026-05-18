@@ -81,7 +81,7 @@ async def upsert_document(
     effective_external_id = f"{request.external_id}:{resolved_mode.value}"
 
     try:
-        doc, action, changed = await service.upsert(
+        doc, action, changed, _stats = await service.upsert(
             db=db,
             tenant_id=tenant_id,
             source=request.source,
@@ -200,7 +200,7 @@ async def upload_document(
     )
 
     try:
-        doc, action, changed = await service.upsert(
+        doc, action, changed, _stats = await service.upsert(
             db=db,
             tenant_id=tenant_id,
             source=source,

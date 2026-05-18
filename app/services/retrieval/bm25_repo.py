@@ -14,7 +14,28 @@ from typing import Protocol, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+_ALLOWED_FTS_CONFIGS = {"simple", "english"}
+
+
+def resolve_postgres_fts_config(raw_config: str | None = None) -> str:
+    """
+    Return a safe PostgreSQL FTS config name.
+
+    Only literal configs in this whitelist are allowed because the value is
+    inserted into an expression-index-friendly SQL literal below.
+    """
+    config = (raw_config or getattr(settings, "POSTGRES_FTS_CONFIG", "simple")).lower().strip()
+    if config not in _ALLOWED_FTS_CONFIGS:
+        logger.warning(
+            "bm25_repo.invalid_fts_config config=%s falling_back=simple",
+            config,
+        )
+        return "simple"
+    return config
 
 
 @dataclass(frozen=True)
@@ -51,8 +72,8 @@ class PgBM25Repository:
     """
     PostgreSQL FTS implementation using ``ts_rank`` + ``ts_headline``.
 
-    Searches ``documents.content_text`` via a GIN index created by
-    migration ``phase4_001``.
+    Searches ``documents.content_text`` via a GIN FTS index. The text search
+    config is intentionally limited to a small whitelist.
 
     Filtering:
       - ``tenant_id`` — hard tenant isolation
@@ -78,24 +99,28 @@ class PgBM25Repository:
         if not allowed_doc_ids or not query_text.strip():
             return []
 
-        stmt = text("""
+        fts_config = resolve_postgres_fts_config()
+
+        # Safe literal interpolation: fts_config is whitelisted to
+        # {"simple", "english"} before it reaches this SQL string.
+        stmt = text(f"""
             SELECT d.id,
                    d.tenant_id,
                    d.checksum,
                    d.title,
                    ts_rank(
-                       to_tsvector('english', COALESCE(d.content_text, '')),
-                       plainto_tsquery('english', :query)
+                       to_tsvector('{fts_config}', COALESCE(d.content_text, '')),
+                       plainto_tsquery('{fts_config}', :query)
                    ) AS rank,
                    ts_headline(
-                       'english',
+                       '{fts_config}',
                        COALESCE(d.content_text, ''),
-                       plainto_tsquery('english', :query),
+                       plainto_tsquery('{fts_config}', :query),
                        'MaxFragments=3,MaxWords=50,MinWords=15'
                    ) AS headline
               FROM documents d
-             WHERE to_tsvector('english', COALESCE(d.content_text, ''))
-                   @@ plainto_tsquery('english', :query)
+             WHERE to_tsvector('{fts_config}', COALESCE(d.content_text, ''))
+                   @@ plainto_tsquery('{fts_config}', :query)
                AND d.tenant_id = :tenant_id
                AND d.id = ANY(:doc_ids)
              ORDER BY rank DESC
@@ -128,8 +153,8 @@ class PgBM25Repository:
             )
 
         logger.info(
-            "bm25_repo.search tenant_id=%s hits=%d limit=%d",
-            tenant_id, len(hits), limit,
+            "bm25_repo.search tenant_id=%s hits=%d limit=%d fts_config=%s",
+            tenant_id, len(hits), limit, fts_config,
         )
         return hits
 

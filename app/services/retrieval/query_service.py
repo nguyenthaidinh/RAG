@@ -199,6 +199,7 @@ class QueryService:
         mode: QueryMode = "hybrid",
         include_debug: bool = False,
         history: list | None = None,
+        allowed_document_ids: set[int] | None = None,
     ) -> list[QueryResult]:
         start = time.monotonic()
 
@@ -254,6 +255,7 @@ class QueryService:
                             tenant_id=tenant_id,
                             query=query_text,
                             limit=max(final_limit, 5),
+                            allowed_document_ids=allowed_document_ids,
                         )
                     )
 
@@ -356,6 +358,24 @@ class QueryService:
                 user_id,
             )
             return []
+
+        # ── R3.1: Intersect with caller-provided document scope ────
+        # When allowed_document_ids is set (e.g. CTĐT scoped retrieval),
+        # restrict candidates to the intersection of access-policy
+        # allowed docs and the caller's explicit scope.
+        # This ensures the restriction flows into VectorFilter and
+        # BM25 allowed_doc_ids BEFORE any search is performed.
+        if allowed_document_ids is not None:
+            access_policy_count = len(allowed)
+            allowed = allowed.intersection(allowed_document_ids)
+            if not allowed:
+                logger.info(
+                    "retrieval.no_documents_in_scope tenant_id=%s user_id=%d "
+                    "access_policy_count=%d caller_scope_count=%d",
+                    tenant_id, user_id,
+                    access_policy_count, len(allowed_document_ids),
+                )
+                return []
 
         # ─────────────────────────────
         # Phase 3: Build execution context

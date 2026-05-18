@@ -6,7 +6,7 @@
 {% block content %}
 
 <div class="flex gap-2" style="flex-wrap: wrap;">
-  <a href="/dashboard/users" class="btn">← Back to Users</a>
+  <a href="/dashboard/users" class="btn">&larr; Back to Users</a>
 </div>
 
 <!-- =========================
@@ -88,7 +88,7 @@
 <div class="section">
   <div class="flex flex-between mb-2">
     <h2>API Keys ({{ api_keys | length }})</h2>
-    <button onclick="createAPIKey({{ target_user.id }})" class="btn btn-primary">+ Create Key</button>
+    <button type="button" onclick="showCreateAPIKeyModal()" class="btn btn-primary">+ Create Key</button>
   </div>
 
   <div class="table-container">
@@ -105,24 +105,39 @@
       </thead>
       <tbody>
         {% for key in api_keys %}
+        {% set is_active_key = key.is_active and not key.revoked_at %}
         <tr>
           <td><strong>{{ key.name }}</strong></td>
-          <td style="font-size: 11px; color: var(--muted2);">ak_live_{{ key.prefix }}...</td>
+          <td class="mono" style="color: var(--muted2);">{{ key.prefix }}</td>
           <td>
-            <span class="badge {% if key.is_active and not key.revoked_at %}badge-success{% else %}badge-danger{% endif %}">
-              {{ "Active" if key.is_active and not key.revoked_at else "Revoked" }}
+            <span class="badge {% if is_active_key %}badge-success{% else %}badge-danger{% endif %}">
+              {{ "Active" if is_active_key else "Revoked" }}
             </span>
           </td>
           <td style="font-size: 12px; color: var(--muted);">
-            {{ key.last_used_at.strftime('%Y-%m-%d %H:%M') if key.last_used_at else "Never" }}
+            {{ key.last_used_at.strftime('%Y-%m-%d %H:%M') if key.last_used_at else "-" }}
           </td>
-          <td style="font-size: 12px; color: var(--muted);">{{ key.created_at.strftime('%Y-%m-%d') }}</td>
+          <td style="font-size: 12px; color: var(--muted);">
+            {{ key.created_at.strftime('%Y-%m-%d') if key.created_at else "-" }}
+          </td>
           <td>
             <div class="flex gap-1">
-              <button onclick="rotateKey({{ key.id }})" class="btn" style="padding: 6px 10px; font-size: 12px;">Rotate</button>
-              {% if key.is_active %}
-              <button onclick="revokeKey({{ key.id }})" class="btn" style="padding: 6px 10px; font-size: 12px;">Revoke</button>
-              {% endif %}
+              <button
+                type="button"
+                onclick="rotateKey({{ key.id }}, this)"
+                class="btn btn-sm"
+                {% if not is_active_key %}disabled title="Revoked keys cannot be rotated"{% endif %}
+              >
+                Rotate
+              </button>
+              <button
+                type="button"
+                onclick="revokeKey({{ key.id }}, this)"
+                class="btn btn-sm btn-danger"
+                {% if not is_active_key %}disabled title="Key already revoked"{% endif %}
+              >
+                Revoke
+              </button>
             </div>
           </td>
         </tr>
@@ -139,7 +154,7 @@
 </div>
 
 <!-- =========================
-     QUERY STATS (Phase 4.2)
+     QUERY STATS
      ========================= -->
 {% if user_query_stats %}
 <div class="section">
@@ -190,7 +205,9 @@
               {{ usage.status_code }}
             </span>
           </td>
-          <td style="font-size: 12px; color: var(--muted);">{{ usage.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td style="font-size: 12px; color: var(--muted);">
+            {{ usage.created_at.strftime('%Y-%m-%d %H:%M') if usage.created_at else "-" }}
+          </td>
         </tr>
         {% else %}
         <tr>
@@ -204,17 +221,58 @@
   </div>
 </div>
 
+<!-- =========================
+     API KEY CREATE MODAL
+     ========================= -->
+<div id="userDetailCreateKeyModal" class="modal-overlay" style="display: none;" aria-hidden="true">
+  <div class="modal">
+    <button type="button" class="modal-close" onclick="closeCreateAPIKeyModal()" aria-label="Close">&times;</button>
+    <h3>Create API Key</h3>
+
+    <div class="form-group">
+      <label>User ID</label>
+      <input type="number" value="{{ target_user.id }}" readonly />
+    </div>
+
+    <div class="form-group">
+      <label for="userDetailKeyName">Key Name</label>
+      <input type="text" id="userDetailKeyName" maxlength="255" placeholder="Enter key name" />
+    </div>
+
+    <div class="api-key-modal-actions">
+      <button type="button" onclick="createAPIKey(this)" class="btn btn-primary">Create</button>
+      <button type="button" onclick="closeCreateAPIKeyModal()" class="btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     API KEY ONE-TIME MODAL
+     ========================= -->
+<div id="userDetailPlainKeyModal" class="modal-overlay" style="display: none;" aria-hidden="true">
+  <div class="modal api-key-one-time">
+    <button type="button" class="modal-close" onclick="closePlainKeyModal()" aria-label="Close">&times;</button>
+    <h3 id="userDetailPlainKeyTitle">API Key Created</h3>
+    <div class="alert alert-warning">Copy now. Plain key is shown only once.</div>
+    <textarea id="userDetailPlainKeyValue" class="token-box mono" rows="3" readonly></textarea>
+    <div class="api-key-modal-actions mt-2">
+      <button type="button" onclick="copyPlainKey()" class="btn btn-primary">Copy</button>
+      <button type="button" onclick="closePlainKeyModal()" class="btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 async function toggleUserStatus(userId, isActive) {
   if (!confirm(`Are you sure you want to ${isActive ? 'enable' : 'disable'} this user?`)) return;
-  
+
   const res = await fetch(`/api/v1/admin/users/${userId}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ is_active: isActive })
   });
-  
+
   if (res.ok) {
     location.reload();
   } else {
@@ -225,14 +283,14 @@ async function toggleUserStatus(userId, isActive) {
 async function changeRole(userId) {
   const role = prompt('Enter new role (user/admin):');
   if (!role || !['user', 'admin'].includes(role)) return;
-  
+
   const res = await fetch(`/api/v1/admin/users/${userId}/role`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ role })
   });
-  
+
   if (res.ok) {
     location.reload();
   } else {
@@ -240,73 +298,204 @@ async function changeRole(userId) {
   }
 }
 
-async function createAPIKey(userId) {
-  const name = prompt('Enter API key name:');
-  if (!name) return;
-  
-  const res = await fetch('/api/v1/admin/api-keys/', {
+const apiKeyTargetUserId = {{ target_user.id }};
+
+function notifyAPIKey(message, type) {
+  if (typeof window.showToast === 'function') {
+    window.showToast(message, type || 'success');
+    return;
+  }
+  console[type === 'error' ? 'error' : 'log'](message);
+}
+
+function setAPIKeyBusy(button, busy, busyText) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = busyText || 'Working...';
+    button.disabled = true;
+    return;
+  }
+  button.textContent = button.dataset.originalText || button.textContent;
+  button.disabled = false;
+}
+
+function readCookie(name) {
+  const parts = document.cookie ? document.cookie.split(';') : [];
+  for (const rawPart of parts) {
+    const part = rawPart.trim();
+    if (part.indexOf(name + '=') === 0) {
+      return decodeURIComponent(part.slice(name.length + 1));
+    }
+  }
+  return '';
+}
+
+function apiKeyDetailToText(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(function (item) {
+      return item && item.msg ? item.msg : String(item);
+    }).join('; ');
+  }
+  return String(detail);
+}
+
+function apiKeyErrorMessage(status, detail) {
+  const text = apiKeyDetailToText(detail);
+  if (status === 403 && text.toLowerCase().indexOf('csrf') !== -1) {
+    return 'CSRF validation failed. Refresh the page and try again.';
+  }
+  if (status === 401) return 'Authentication required. Please sign in again.';
+  if (status === 403) return 'Admin access required for this action.';
+  if (status === 404) return text || 'User or API key not found or not accessible.';
+  if (status === 409) return text || 'API key is already revoked or inactive.';
+  if (status >= 500) return 'Server error while processing API key request.';
+  return text || ('Request failed with status ' + status + '.');
+}
+
+async function postAPIKeyJson(url, body) {
+  const csrfToken = readCookie('csrf_token');
+  const options = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ user_id: userId, name })
-  });
-  
-  if (res.ok) {
-    const data = await res.json();
-    showAPIKeyModal(data.key, 'New API Key Created');
-  } else {
-    alert('Failed to create API key');
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-CSRF-Token': csrfToken
+    },
+    credentials: 'include'
+  };
+  if (body !== undefined) {
+    options.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(url, options);
+  let payload = null;
+  try {
+    payload = await res.json();
+  } catch (err) {
+    payload = null;
+  }
+  if (!res.ok) {
+    throw new Error(apiKeyErrorMessage(res.status, payload && payload.detail));
+  }
+  return payload;
+}
+
+function requirePlainKey(payload) {
+  if (!payload || !payload.plain_key) {
+    throw new Error('API response did not include a plain key.');
+  }
+  return payload.plain_key;
+}
+
+function showCreateAPIKeyModal() {
+  const modal = document.getElementById('userDetailCreateKeyModal');
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  setTimeout(function () {
+    document.getElementById('userDetailKeyName').focus();
+  }, 0);
+}
+
+function closeCreateAPIKeyModal() {
+  const modal = document.getElementById('userDetailCreateKeyModal');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+async function createAPIKey(button) {
+  const name = document.getElementById('userDetailKeyName').value.trim();
+  if (!name) {
+    notifyAPIKey('Enter an API key name.', 'error');
+    return;
+  }
+
+  setAPIKeyBusy(button, true, 'Creating...');
+  try {
+    const data = await postAPIKeyJson('/api/v1/admin/api-keys/', {
+      user_id: apiKeyTargetUserId,
+      name: name
+    });
+    closeCreateAPIKeyModal();
+    document.getElementById('userDetailKeyName').value = '';
+    notifyAPIKey('API key created.', 'success');
+    showPlainKeyModal('New API Key Created', requirePlainKey(data));
+  } catch (err) {
+    notifyAPIKey(err.message || 'Failed to create API key.', 'error');
+  } finally {
+    setAPIKeyBusy(button, false);
   }
 }
 
-async function rotateKey(keyId) {
+async function rotateKey(keyId, button) {
   if (!confirm('Rotate this API key? Old key will be revoked.')) return;
-  
-  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/rotate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include'
-  });
-  
-  if (res.ok) {
-    const data = await res.json();
-    showAPIKeyModal(data.key, 'API Key Rotated');
-  } else {
-    alert('Failed to rotate key');
+
+  setAPIKeyBusy(button, true, 'Rotating...');
+  try {
+    const data = await postAPIKeyJson(`/api/v1/admin/api-keys/${keyId}/rotate`);
+    notifyAPIKey('API key rotated.', 'success');
+    showPlainKeyModal('API Key Rotated', requirePlainKey(data));
+  } catch (err) {
+    notifyAPIKey(err.message || 'Failed to rotate API key.', 'error');
+    setAPIKeyBusy(button, false);
   }
 }
 
-async function revokeKey(keyId) {
+async function revokeKey(keyId, button) {
   if (!confirm('Revoke this API key?')) return;
-  
-  const res = await fetch(`/api/v1/admin/api-keys/${keyId}/revoke`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include'
-  });
-  
-  if (res.ok) {
-    location.reload();
-  } else {
-    alert('Failed to revoke key');
+
+  setAPIKeyBusy(button, true, 'Revoking...');
+  try {
+    await postAPIKeyJson(`/api/v1/admin/api-keys/${keyId}/revoke`);
+    notifyAPIKey('API key revoked.', 'success');
+    setTimeout(function () {
+      location.reload();
+    }, 600);
+  } catch (err) {
+    notifyAPIKey(err.message || 'Failed to revoke API key.', 'error');
+    setAPIKeyBusy(button, false);
   }
 }
 
-function showAPIKeyModal(key, title) {
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal">
-      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
-      <h3>${title}</h3>
-      <p style="color: var(--warning); margin-bottom: 12px; font-size: 12px;">
-        ⚠️ This key will only be shown once. Save it now!
-      </p>
-      <textarea class="token-box" rows="3" readonly onclick="this.select()">${key}</textarea>
-      <button class="btn btn-primary mt-2" onclick="this.closest('.modal-overlay').remove(); location.reload();">Close</button>
-    </div>
-  `;
-  document.body.appendChild(modal);
+function showPlainKeyModal(title, plainKey) {
+  document.getElementById('userDetailPlainKeyTitle').textContent = title;
+  document.getElementById('userDetailPlainKeyValue').value = plainKey;
+
+  const modal = document.getElementById('userDetailPlainKeyModal');
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  setTimeout(function () {
+    const field = document.getElementById('userDetailPlainKeyValue');
+    field.focus();
+    field.select();
+  }, 0);
+}
+
+function closePlainKeyModal() {
+  const modal = document.getElementById('userDetailPlainKeyModal');
+  document.getElementById('userDetailPlainKeyValue').value = '';
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  location.reload();
+}
+
+async function copyPlainKey() {
+  const field = document.getElementById('userDetailPlainKeyValue');
+  field.focus();
+  field.select();
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(field.value);
+    } else {
+      document.execCommand('copy');
+    }
+    notifyAPIKey('API key copied.', 'success');
+  } catch (err) {
+    notifyAPIKey('Copy failed. Select the key and copy manually.', 'error');
+  }
 }
 </script>
 

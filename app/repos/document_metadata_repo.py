@@ -122,12 +122,23 @@ class DocumentMetadataRepo:
         tenant_id: str,
         conditions: MetadataSearchConditions,
         limit: int = 20,
+        allowed_document_ids: Sequence[int] | None = None,
     ) -> Sequence[Document]:
+        if allowed_document_ids is not None:
+            allowed_ids = {int(doc_id) for doc_id in allowed_document_ids}
+            if not allowed_ids:
+                return []
+        else:
+            allowed_ids = None
+
         stmt: Select = (
             select(Document)
             .where(Document.tenant_id == tenant_id)
             .where(Document.status == "ready")
         )
+
+        if allowed_ids is not None:
+            stmt = stmt.where(Document.id.in_(allowed_ids))
 
         filters = []
 

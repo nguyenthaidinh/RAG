@@ -21,6 +21,7 @@ class MetadataFirstRetrievalService:
         tenant_id: str,
         query: str,
         limit: int = 10,
+        allowed_document_ids: Sequence[int] | None = None,
     ) -> list[MetadataCandidate]:
         conditions = self._parse_query_to_conditions(query)
         docs = await self.repo.search_candidates(
@@ -28,6 +29,7 @@ class MetadataFirstRetrievalService:
             tenant_id=tenant_id,
             conditions=conditions,
             limit=limit,
+            allowed_document_ids=allowed_document_ids,
         )
         candidates = self._score_candidates(query=query, docs=docs, conditions=conditions)
         candidates.sort(key=lambda x: x.score, reverse=True)

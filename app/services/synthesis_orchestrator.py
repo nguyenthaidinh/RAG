@@ -141,7 +141,7 @@ async def _do_synthesize(
     # ── 3. Upsert synthesized child through existing pipeline ────────
     doc_svc = DocumentService()
 
-    child_doc, action, changed = await doc_svc.upsert(
+    child_doc, action, changed, _stats = await doc_svc.upsert(
         db=db,
         tenant_id=tenant_id,
         source=synth_source,

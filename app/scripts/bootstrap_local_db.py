@@ -10,6 +10,9 @@ async def main():
         # Tạo toàn bộ bảng từ ORM models hiện tại
         await conn.run_sync(Base.metadata.create_all)
 
+        # Alembic is the source of truth for production schema. This script
+        # mirrors key Alembic DDL only for local/dev bootstrap convenience.
+
         # Bật pgvector
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
@@ -34,9 +37,14 @@ async def main():
         ON document_vectors (tenant_id, document_id)
         """))
 
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_docvec_tenant_doc_version
+        ON document_vectors (tenant_id, document_id, version_id)
+        """))
+
         # BM25 / FTS index cho documents
         await conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_documents_content_fts
+        CREATE INDEX IF NOT EXISTS idx_documents_content_fts_simple
         ON documents
         USING GIN (to_tsvector('simple', COALESCE(content_text, '')))
         """))

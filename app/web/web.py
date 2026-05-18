@@ -404,7 +404,18 @@ async def dashboard_api_keys(
     except Exception:
         return RedirectResponse("/login")
 
-    keys = await APIKeyService.list_by_user_id(db, user_id) if user_id else []
+    keys = []
+    target_user = None
+    filter_error = None
+
+    if user_id:
+        actor = await UserService.get_by_id(db, admin["id"])
+        detail = await AdminUserService.get_user_detail(db, user_id, actor=actor)
+        if not detail:
+            filter_error = "User not found or not accessible."
+        else:
+            target_user = detail["user"]
+            keys = await APIKeyService.list_by_user_id(db, user_id)
 
     return templates.TemplateResponse(
         "dashboard/api_keys.html",
@@ -413,6 +424,663 @@ async def dashboard_api_keys(
             "user": admin,
             "api_keys": keys,
             "filter_user_id": user_id,
+            "target_user": target_user,
+            "filter_error": filter_error,
+        },
+    )
+
+
+# =========================
+# RAG CENTER - Phase R6.4-UI-1
+# =========================
+@router.get("/dashboard/rag", response_class=HTMLResponse)
+async def dashboard_rag_center(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    metrics = [
+        {"label": "Tổng API Keys", "value": "24", "variant": "card-accent"},
+        {"label": "API Keys đang hoạt động", "value": "18", "variant": "card-success"},
+        {"label": "Requests hôm nay", "value": "1,284", "variant": ""},
+        {"label": "Lỗi hôm nay", "value": "7", "variant": "card-danger"},
+        {"label": "Mapping drafts", "value": "12", "variant": "card-warning"},
+        {"label": "Documents indexed", "value": "3,420", "variant": ""},
+    ]
+
+    system_statuses = [
+        {"label": "RAG API", "status": "Online", "badge": "badge-success"},
+        {"label": "CTĐT API", "status": "Available", "badge": "badge-success"},
+        {"label": "Vector Index", "status": "Ready", "badge": "badge-primary"},
+        {"label": "Embedding Provider", "status": "Configured", "badge": "badge-accent"},
+        {"label": "Mapping Draft Engine", "status": "Available", "badge": "badge-success"},
+    ]
+
+    quick_actions = [
+        {
+            "label": "Quản lý API Keys",
+            "href": "/dashboard/api-keys",
+            "description": "Tạo, xoay vòng và thu hồi API key quản trị.",
+            "disabled": False,
+        },
+        {
+            "label": "Xem Usage Logs",
+            "href": "/dashboard/rag/usage",
+            "description": "Theo dõi request, lỗi và hoạt động truy vấn.",
+            "disabled": False,
+        },
+        {
+            "label": "CTĐT API Catalog",
+            "href": "/dashboard/rag/ctdt",
+            "description": "Tổng hợp endpoint CTĐT quan trọng.",
+            "disabled": False,
+        },
+        {
+            "label": "Cấu hình RAG",
+            "href": "/dashboard/rag/settings",
+            "description": "Thiết lập provider, index và pipeline RAG.",
+            "disabled": False,
+        },
+    ]
+
+    recent_activities = [
+        {
+            "time": "09:42",
+            "actor": "system_admin",
+            "action": "Build mapping draft",
+            "target": "update_cycle: 2026-CTDT-01",
+            "status": "Success",
+            "badge": "badge-success",
+        },
+        {
+            "time": "09:17",
+            "actor": "tenant_admin",
+            "action": "Analyze cycle",
+            "target": "Khoa CNTT",
+            "status": "Queued",
+            "badge": "badge-warning",
+        },
+        {
+            "time": "08:55",
+            "actor": "api_key: rag-demo",
+            "action": "Query",
+            "target": "/api/v1/query",
+            "status": "Success",
+            "badge": "badge-success",
+        },
+        {
+            "time": "08:21",
+            "actor": "system",
+            "action": "Index document",
+            "target": "CTĐT handbook",
+            "status": "Ready",
+            "badge": "badge-primary",
+        },
+        {
+            "time": "07:48",
+            "actor": "api_key: assistant-demo",
+            "action": "Assistant request",
+            "target": "/api/v1/assistant",
+            "status": "Error",
+            "badge": "badge-danger",
+        },
+    ]
+
+    ctdt_endpoints = [
+        {
+            "method": "GET",
+            "path": "/api/v1/ctdt/update-cycles/{update_cycle_id}/mapping-draft/latest",
+        },
+        {"method": "POST", "path": "/api/v1/ctdt/mapping-draft/build"},
+        {"method": "POST", "path": "/api/v1/ctdt/analyze-cycle"},
+        {"method": "POST", "path": "/api/v1/query"},
+        {"method": "POST", "path": "/api/v1/assistant"},
+    ]
+
+    return templates.TemplateResponse(
+        "dashboard/rag.html",
+        {
+            "request": request,
+            "user": admin,
+            "metrics": metrics,
+            "system_statuses": system_statuses,
+            "quick_actions": quick_actions,
+            "recent_activities": recent_activities,
+            "ctdt_endpoints": ctdt_endpoints,
+        },
+    )
+
+
+# =========================
+# CTDT API CATALOG - Phase R6.4-UI-3
+# =========================
+@router.get("/dashboard/rag/ctdt", response_class=HTMLResponse)
+async def dashboard_rag_ctdt_catalog(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    catalog = [
+        {
+            "method": "GET",
+            "path": "/api/v1/ctdt/update-cycles/{update_cycle_id}/mapping-draft/latest",
+            "group": "Mapping Draft",
+            "purpose": "Lấy bản mapping draft mới nhất theo update cycle",
+            "status": "Available",
+            "auth": "API Key/JWT",
+            "notes": "R6.3C",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/ctdt/mapping-draft/build",
+            "group": "Mapping Draft",
+            "purpose": "Build mapping draft từ dữ liệu phân tích",
+            "status": "Available",
+            "auth": "API Key/JWT",
+            "notes": "Dùng cho luồng tạo draft",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/ctdt/analyze-cycle",
+            "group": "CTĐT Analysis",
+            "purpose": "Phân tích một đợt cập nhật CTĐT",
+            "status": "Available",
+            "auth": "API Key/JWT",
+            "notes": "Đầu vào cho review và mapping",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/query",
+            "group": "Query",
+            "purpose": "Truy vấn RAG trực tiếp",
+            "status": "Available",
+            "auth": "API Key/JWT",
+            "notes": "Endpoint RAG chính",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/assistant",
+            "group": "Assistant",
+            "purpose": "Chat assistant dùng RAG context",
+            "status": "Available",
+            "auth": "API Key/JWT",
+            "notes": "Dùng cho trải nghiệm hội thoại",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/documents",
+            "group": "Admin",
+            "purpose": "Quản lý tài liệu đã ingest",
+            "status": "Available",
+            "auth": "JWT",
+            "notes": "Theo dõi corpus RAG",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/documents/upload",
+            "group": "Admin",
+            "purpose": "Upload/ingest tài liệu",
+            "status": "Available",
+            "auth": "JWT",
+            "notes": "Nguồn dữ liệu index",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/admin/users",
+            "group": "Admin",
+            "purpose": "Quản lý user",
+            "status": "Available",
+            "auth": "JWT",
+            "notes": "Admin dashboard/API",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/auth/login",
+            "group": "Auth",
+            "purpose": "Đăng nhập lấy token",
+            "status": "Available",
+            "auth": "Public",
+            "notes": "Web login dùng cookie/JWT",
+        },
+        {
+            "method": "GET",
+            "path": "/health/live",
+            "group": "Health",
+            "purpose": "Health check service",
+            "status": "Available",
+            "auth": "None",
+            "notes": "Dùng cho uptime probe",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/ctdt/openapi/catalog",
+            "group": "CTĐT Analysis",
+            "purpose": "Catalog endpoint tự động từ OpenAPI",
+            "status": "Planned",
+            "auth": "API Key/JWT",
+            "notes": "Phase sau",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/ctdt/mapping-draft/export",
+            "group": "Mapping Draft",
+            "purpose": "Export mapping draft cho Laravel CTĐT",
+            "status": "Planned",
+            "auth": "API Key/JWT",
+            "notes": "Chưa triển khai",
+        },
+    ]
+
+    metrics = [
+        {"label": "Total endpoints", "value": str(len(catalog)), "variant": "card-accent"},
+        {
+            "label": "CTĐT endpoints",
+            "value": str(sum(1 for item in catalog if item["group"] == "CTĐT Analysis")),
+            "variant": "card-success",
+        },
+        {
+            "label": "Mapping Draft endpoints",
+            "value": str(sum(1 for item in catalog if item["group"] == "Mapping Draft")),
+            "variant": "card-warning",
+        },
+        {
+            "label": "Query/Assistant endpoints",
+            "value": str(sum(1 for item in catalog if item["group"] in ("Query", "Assistant"))),
+            "variant": "",
+        },
+        {
+            "label": "Available endpoints",
+            "value": str(sum(1 for item in catalog if item["status"] == "Available")),
+            "variant": "card-success",
+        },
+    ]
+
+    group_options = [
+        "All groups",
+        "CTĐT Analysis",
+        "Mapping Draft",
+        "Query",
+        "Assistant",
+        "Admin",
+    ]
+    method_options = ["All methods", "GET", "POST"]
+    status_options = ["All", "Available", "Planned", "Deprecated"]
+    integration_notes = [
+        "Laravel CTĐT có thể gọi các endpoint này qua RAG_BASE_URL.",
+        "API key thật sẽ được quản lý qua API Keys page.",
+        "Mapping draft latest endpoint đã có từ R6.3C.",
+        "Phase này chỉ là catalog UI, chưa tự introspect OpenAPI.",
+    ]
+
+    return templates.TemplateResponse(
+        "dashboard/rag_ctdt.html",
+        {
+            "request": request,
+            "user": admin,
+            "metrics": metrics,
+            "catalog": catalog,
+            "group_options": group_options,
+            "method_options": method_options,
+            "status_options": status_options,
+            "integration_notes": integration_notes,
+        },
+    )
+
+
+# =========================
+# RAG SETTINGS / HEALTH - Phase R6.4-UI-4
+# =========================
+@router.get("/dashboard/rag/settings", response_class=HTMLResponse)
+async def dashboard_rag_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    from urllib.parse import urlsplit, urlunsplit
+    from app.core.config import settings as app_settings
+
+    def raw_config(name: str):
+        return getattr(app_settings, name, None)
+
+    def display_config(name: str, default: str = "N/A") -> str:
+        value = raw_config(name)
+        if value is None:
+            return default
+        if isinstance(value, str):
+            value = value.strip()
+            return value if value else default
+        return str(value)
+
+    def secret_status(name: str) -> dict[str, str]:
+        value = raw_config(name)
+        configured = bool(value.strip()) if isinstance(value, str) else value is not None
+        return {
+            "value": "Configured" if configured else "Not configured",
+            "badge": "badge-success" if configured else "badge-danger",
+        }
+
+    def status_badge(status: str) -> str:
+        return {
+            "Ready": "badge-success",
+            "Configured": "badge-success",
+            "Not configured": "badge-danger",
+            "Planned": "badge-warning",
+            "Unknown": "badge-muted",
+        }.get(status, "badge-muted")
+
+    def safe_url(value: str) -> str:
+        if not value or value in ("N/A", "Not configured"):
+            return "Not configured"
+        try:
+            parsed = urlsplit(value)
+            if parsed.scheme and parsed.netloc:
+                host = parsed.hostname or ""
+                port = f":{parsed.port}" if parsed.port else ""
+                return urlunsplit((parsed.scheme, f"{host}{port}", parsed.path, "", ""))
+        except Exception:
+            return "Configured"
+        return value
+
+    app_name = display_config("APP_NAME")
+    env = display_config("ENV")
+    embedding_provider = display_config("EMBEDDING_PROVIDER", "Not configured")
+    embedding_model = display_config("EMBEDDING_MODEL", "Not configured")
+    embedding_dim = display_config("EMBEDDING_DIM", "N/A")
+    vector_index = display_config("VECTOR_INDEX", "Not configured")
+    retrieval_mode = (
+        display_config("RETRIEVAL_MODE", "")
+        or display_config("RETRIEVAL_REPRESENTATION_MODE", "N/A")
+    )
+    query_max_k = display_config("QUERY_MAX_K", "") or display_config("QUERY_FINAL_LIMIT", "N/A")
+    rag_base_url = display_config("RAG_BASE_URL", "") or display_config("PUBLIC_BASE_URL", "N/A")
+    qdrant_url = safe_url(display_config("QDRANT_URL", ""))
+    openai_secret = secret_status("OPENAI_API_KEY")
+    database_secret = secret_status("DATABASE_URL")
+    jwt_secret_name = "JWT_SECRET" if raw_config("JWT_SECRET") is not None else "SECRET_KEY"
+    jwt_secret = secret_status(jwt_secret_name)
+
+    vector_status = (
+        "Not configured"
+        if vector_index.lower() in ("", "n/a", "not configured", "none", "null")
+        else "Ready"
+    )
+    embedding_status = (
+        "Not configured"
+        if embedding_provider.lower() in ("", "n/a", "not configured", "none")
+        else "Configured"
+    )
+
+    metrics = [
+        {"label": "Environment", "value": env, "variant": "card-accent"},
+        {"label": "Embedding Provider", "value": embedding_provider, "variant": "card-success" if embedding_status == "Configured" else "card-danger"},
+        {"label": "Vector Index", "value": vector_index, "variant": "card-success" if vector_status == "Ready" else "card-danger"},
+        {"label": "Retrieval Mode", "value": retrieval_mode, "variant": ""},
+        {"label": "API Key Secret", "value": openai_secret["value"], "variant": "card-success" if openai_secret["value"] == "Configured" else "card-danger"},
+        {"label": "Database", "value": database_secret["value"], "variant": "card-success" if database_secret["value"] == "Configured" else "card-danger"},
+    ]
+
+    runtime_config = [
+        {"key": "APP_NAME", "value": app_name, "notes": "Tên runtime service."},
+        {"key": "ENV", "value": env, "notes": "Môi trường triển khai hiện tại."},
+        {"key": "EMBEDDING_PROVIDER", "value": embedding_provider, "notes": "Provider sinh embedding."},
+        {"key": "EMBEDDING_MODEL", "value": embedding_model, "notes": "Model embedding đang cấu hình."},
+        {"key": "EMBEDDING_DIM", "value": embedding_dim, "notes": "Số chiều vector embedding."},
+        {"key": "VECTOR_INDEX", "value": vector_index, "notes": "Backend vector index."},
+        {"key": "RETRIEVAL_MODE", "value": retrieval_mode, "notes": "Chế độ retrieval mặc định."},
+        {"key": "QUERY_MAX_K", "value": query_max_k, "notes": "Fallback từ QUERY_FINAL_LIMIT nếu QUERY_MAX_K chưa có."},
+        {"key": "RAG_BASE_URL / PUBLIC_BASE_URL", "value": rag_base_url, "notes": "URL Laravel CTĐT gọi đến RAG service."},
+        {"key": "OPENAI_API_KEY", "value": openai_secret["value"], "notes": "Secret được mask, không render key thật."},
+        {"key": "QDRANT_URL", "value": qdrant_url, "notes": "URL hiển thị đã loại bỏ credential nếu có."},
+        {"key": "DATABASE_URL", "value": database_secret["value"], "notes": "Connection string được mask."},
+    ]
+
+    provider_health = [
+        {"name": "Embedding provider", "status": embedding_status, "badge": status_badge(embedding_status), "details": embedding_provider},
+        {"name": "Vector index", "status": vector_status, "badge": status_badge(vector_status), "details": vector_index},
+        {"name": "Database", "status": database_secret["value"], "badge": database_secret["badge"], "details": "Connection string masked"},
+        {"name": "CTĐT API router", "status": "Ready", "badge": status_badge("Ready"), "details": "/api/v1/ctdt"},
+        {"name": "Mapping Draft Engine", "status": "Ready", "badge": status_badge("Ready"), "details": "R6.3C latest draft endpoint available"},
+        {"name": "Usage logging", "status": "Planned", "badge": status_badge("Planned"), "details": "Mock UI only in this phase"},
+    ]
+
+    safe_secrets = [
+        {"key": "OPENAI_API_KEY", "status": openai_secret["value"], "badge": openai_secret["badge"]},
+        {"key": "DATABASE_URL", "status": database_secret["value"], "badge": database_secret["badge"]},
+        {"key": "JWT_SECRET / SECRET_KEY", "status": jwt_secret["value"], "badge": jwt_secret["badge"]},
+    ]
+
+    integration_notes = [
+        "Laravel CTĐT nên gọi RAG qua RAG_BASE_URL.",
+        "API Keys page quản lý key truy cập.",
+        "Usage Logs page sẽ nối dữ liệu thật ở phase sau.",
+        "CTĐT APIs page hiện là static catalog.",
+        "Thay đổi config thật nên qua .env/deployment, không sửa trực tiếp trên UI ở phase này.",
+    ]
+
+    readonly_settings = [
+        {"label": "RAG endpoint URL", "value": rag_base_url},
+        {"label": "Default retrieval mode", "value": retrieval_mode},
+        {"label": "Max query K", "value": query_max_k},
+        {"label": "Enable usage logging", "value": "Planned"},
+        {"label": "Enable mapping draft access", "value": "Enabled"},
+        {"label": "Embedding provider", "value": embedding_provider},
+        {"label": "Vector index", "value": vector_index},
+    ]
+
+    return templates.TemplateResponse(
+        "dashboard/rag_settings.html",
+        {
+            "request": request,
+            "user": admin,
+            "metrics": metrics,
+            "runtime_config": runtime_config,
+            "provider_health": provider_health,
+            "safe_secrets": safe_secrets,
+            "integration_notes": integration_notes,
+            "readonly_settings": readonly_settings,
+        },
+    )
+
+
+# =========================
+# RAG USAGE LOGS - Phase R6.4-UI-2
+# =========================
+@router.get("/dashboard/rag/usage", response_class=HTMLResponse)
+async def dashboard_rag_usage(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    metrics = [
+        {"label": "Requests hôm nay", "value": "1,284", "variant": "card-accent"},
+        {"label": "Success rate", "value": "98.6%", "variant": "card-success"},
+        {"label": "Avg latency", "value": "184 ms", "variant": ""},
+        {"label": "Token usage hôm nay", "value": "248K", "variant": "card-warning"},
+        {"label": "Errors hôm nay", "value": "7", "variant": "card-danger"},
+    ]
+
+    endpoint_options = [
+        "All endpoints",
+        "/api/v1/query",
+        "/api/v1/assistant",
+        "/api/v1/ctdt/analyze-cycle",
+        "/api/v1/ctdt/mapping-draft/build",
+        "/api/v1/ctdt/update-cycles/{id}/mapping-draft/latest",
+    ]
+
+    status_options = ["All", "Success", "Error"]
+
+    usage_logs = [
+        {
+            "time": "2026-05-18 09:58:12",
+            "actor": "api_key: rag-demo",
+            "method": "POST",
+            "endpoint": "/api/v1/query",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "142 ms",
+            "tokens": "1,248",
+            "ip": "10.12.0.24",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 09:55:43",
+            "actor": "api_key: assistant-demo",
+            "method": "POST",
+            "endpoint": "/api/v1/assistant",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "231 ms",
+            "tokens": "2,904",
+            "ip": "10.12.0.31",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 09:51:08",
+            "actor": "tenant_admin",
+            "method": "POST",
+            "endpoint": "/api/v1/ctdt/analyze-cycle",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "618 ms",
+            "tokens": "8,420",
+            "ip": "10.12.1.10",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 09:44:37",
+            "actor": "system_admin",
+            "method": "POST",
+            "endpoint": "/api/v1/ctdt/mapping-draft/build",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "734 ms",
+            "tokens": "12,118",
+            "ip": "10.12.1.12",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 09:39:20",
+            "actor": "tenant_admin",
+            "method": "GET",
+            "endpoint": "/api/v1/ctdt/update-cycles/{id}/mapping-draft/latest",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "86 ms",
+            "tokens": "0",
+            "ip": "10.12.1.10",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 09:32:02",
+            "actor": "api_key: rag-demo",
+            "method": "POST",
+            "endpoint": "/api/v1/query",
+            "status_code": 422,
+            "result": "Error",
+            "badge": "badge-danger",
+            "latency": "39 ms",
+            "tokens": "0",
+            "ip": "10.12.0.24",
+            "error_code": "VALIDATION_ERROR",
+        },
+        {
+            "time": "2026-05-18 09:18:49",
+            "actor": "anonymous",
+            "method": "POST",
+            "endpoint": "/api/v1/assistant",
+            "status_code": 401,
+            "result": "Error",
+            "badge": "badge-danger",
+            "latency": "21 ms",
+            "tokens": "0",
+            "ip": "203.0.113.44",
+            "error_code": "UNAUTHORIZED",
+        },
+        {
+            "time": "2026-05-18 09:07:16",
+            "actor": "api_key: assistant-demo",
+            "method": "POST",
+            "endpoint": "/api/v1/assistant",
+            "status_code": 500,
+            "result": "Error",
+            "badge": "badge-danger",
+            "latency": "1,840 ms",
+            "tokens": "512",
+            "ip": "10.12.0.31",
+            "error_code": "PROVIDER_TIMEOUT",
+        },
+        {
+            "time": "2026-05-18 08:56:54",
+            "actor": "api_key: ctdt-batch",
+            "method": "POST",
+            "endpoint": "/api/v1/ctdt/mapping-draft/build",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "691 ms",
+            "tokens": "10,772",
+            "ip": "10.12.2.5",
+            "error_code": "-",
+        },
+        {
+            "time": "2026-05-18 08:43:11",
+            "actor": "tenant_admin",
+            "method": "POST",
+            "endpoint": "/api/v1/ctdt/analyze-cycle",
+            "status_code": 422,
+            "result": "Error",
+            "badge": "badge-danger",
+            "latency": "47 ms",
+            "tokens": "0",
+            "ip": "10.12.1.10",
+            "error_code": "MISSING_UPDATE_CYCLE",
+        },
+        {
+            "time": "2026-05-18 08:31:26",
+            "actor": "api_key: rag-demo",
+            "method": "POST",
+            "endpoint": "/api/v1/query",
+            "status_code": 200,
+            "result": "Success",
+            "badge": "badge-success",
+            "latency": "156 ms",
+            "tokens": "1,034",
+            "ip": "10.12.0.24",
+            "error_code": "-",
+        },
+    ]
+
+    return templates.TemplateResponse(
+        "dashboard/rag_usage.html",
+        {
+            "request": request,
+            "user": admin,
+            "metrics": metrics,
+            "endpoint_options": endpoint_options,
+            "status_options": status_options,
+            "usage_logs": usage_logs,
         },
     )
 

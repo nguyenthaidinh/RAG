@@ -1,0 +1,124 @@
+{% extends "layout.html" %}
+
+{% block title %}RAG Usage Logs | AI Server{% endblock %}
+{% block page_title %}RAG Usage Logs{% endblock %}
+
+{% block content %}
+
+<div class="rag-page-header">
+  <div>
+    <h1>RAG Usage Logs</h1>
+    <p>Theo dõi request, endpoint, latency, token usage và lỗi RAG/CTĐT</p>
+  </div>
+  <span class="badge badge-primary">Phase R6.4-UI-2</span>
+</div>
+
+<div class="cards">
+  {% for metric in metrics %}
+  <div class="card {{ metric.variant }}">
+    <h3>{{ metric.label }}</h3>
+    <p class="stat-number">{{ metric.value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>Filters</h2>
+  <form method="get" action="/dashboard/rag/usage" class="rag-usage-filters">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Client/User</label>
+        <input type="text" name="actor" placeholder="api_key, email hoặc user id" />
+      </div>
+
+      <div class="form-group">
+        <label>Endpoint</label>
+        <select name="endpoint">
+          {% for endpoint in endpoint_options %}
+          <option value="{% if loop.first %}{% else %}{{ endpoint }}{% endif %}">{{ endpoint }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Status</label>
+        <select name="status">
+          {% for status in status_options %}
+          <option value="{% if status == 'All' %}{% else %}{{ status }}{% endif %}">{{ status }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Date range</label>
+        <input type="text" name="date_range" placeholder="2026-05-18 - 2026-05-18" />
+      </div>
+    </div>
+
+    <div class="flex gap-1">
+      <button type="submit" class="btn btn-primary">Filter</button>
+      <a href="/dashboard/rag/usage" class="btn">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>Usage log table</h2>
+    <span class="badge badge-muted">{{ usage_logs | length }} mock rows</span>
+  </div>
+
+  <div class="table-container rag-usage-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Actor</th>
+          <th>Method</th>
+          <th>Endpoint</th>
+          <th>Status Code</th>
+          <th>Result</th>
+          <th>Latency</th>
+          <th>Tokens</th>
+          <th>IP</th>
+          <th>Error Code</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in usage_logs %}
+        <tr>
+          <td class="mono">{{ item.time }}</td>
+          <td>{{ item.actor }}</td>
+          <td>
+            <span class="badge {% if item.method == 'GET' %}badge-primary{% else %}badge-accent{% endif %}">
+              {{ item.method }}
+            </span>
+          </td>
+          <td class="mono">{{ item.endpoint }}</td>
+          <td class="mono">{{ item.status_code }}</td>
+          <td><span class="badge {{ item.badge }}">{{ item.result }}</span></td>
+          <td>{{ item.latency }}</td>
+          <td>{{ item.tokens }}</td>
+          <td class="mono">{{ item.ip }}</td>
+          <td class="mono">{{ item.error_code }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <h3>Chưa có usage log</h3>
+              <p>Khi có dữ liệu thật, các request RAG/CTĐT sẽ xuất hiện tại đây.</p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="alert alert-warning rag-note">
+  Phase này dùng mock data. Usage thật sẽ được nối với query_usages / usage ledger ở phase sau.
+</div>
+
+{% endblock %}

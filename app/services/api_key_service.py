@@ -9,6 +9,20 @@ from app.core.audit import audit_log
 
 class APIKeyService:
     @staticmethod
+    def _generate_api_key_material() -> tuple[str, str, str]:
+        """
+        Generate API key material using the existing format:
+        ak_live_<prefix>.<secret>
+
+        The returned tuple is (prefix, raw_secret, full_key). Only the
+        raw_secret hash should ever be persisted.
+        """
+        raw_secret = secrets.token_urlsafe(32)
+        prefix = f"ak_live_{secrets.token_hex(8)}"
+        full_key = f"{prefix}.{raw_secret}"
+        return prefix, raw_secret, full_key
+
+    @staticmethod
     async def get_by_id(db: AsyncSession, key_id: int) -> APIKey | None:
         res = await db.execute(select(APIKey).where(APIKey.id == key_id))
         return res.scalar_one_or_none()
@@ -21,6 +35,45 @@ class APIKeyService:
             .order_by(APIKey.created_at.desc())
         )
         return list(res.scalars().all())
+
+    @staticmethod
+    async def create_api_key(
+        db: AsyncSession,
+        user_id: int,
+        tenant_id: str,
+        name: str,
+        *,
+        actor_user_id: int | None = None,
+    ) -> tuple[APIKey, str]:
+        """
+        Create an API key and return the ORM object plus the one-time
+        plaintext key. The plaintext value is never stored.
+        """
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("API key name is required")
+
+        prefix, raw_secret, full_key = APIKeyService._generate_api_key_material()
+        api_key = APIKey(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            name=clean_name,
+            prefix=prefix,
+            secret_hash=hash_password(raw_secret),
+            is_active=True,
+        )
+        db.add(api_key)
+        await db.flush()
+
+        audit_log(
+            action="api_key.create",
+            actor_user_id=actor_user_id,
+            tenant_id=tenant_id,
+            target_id=api_key.id,
+            detail=f"Created API key '{clean_name}' (prefix={prefix})",
+        )
+
+        return api_key, full_key
 
     @staticmethod
     async def verify_api_key(
@@ -112,20 +165,13 @@ class APIKeyService:
             old_key.revoked_at = datetime.now(timezone.utc)
             old_key.is_active = False
 
-            # Inline key creation (prefix.secret format)
-            raw_secret = secrets.token_urlsafe(32)
-            prefix = f"ak_live_{secrets.token_hex(8)}"
-            new_key = APIKey(
+            new_key, full_key = await APIKeyService.create_api_key(
+                db,
                 user_id=old_key.user_id,
                 tenant_id=old_key.tenant_id,
                 name=f"{old_key.name} (rotated)",
-                prefix=prefix,
-                secret_hash=hash_password(raw_secret),
-                is_active=True,
+                actor_user_id=actor_user_id,
             )
-            db.add(new_key)
-            await db.flush()
-            full_key = f"{prefix}.{raw_secret}"
 
         audit_log(
             action="api_key.rotate",

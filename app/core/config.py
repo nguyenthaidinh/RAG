@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     HYBRID_VECTOR_WEIGHT: float = 0.7
     HYBRID_BM25_WEIGHT: float = 0.3
     HYBRID_THRESHOLD: float = 0.0
+    POSTGRES_FTS_CONFIG: str = "simple"
     LLM_QUERY_PLANNER_ENABLED: bool = False
     LLM_QUERY_PLANNER_PROVIDER: str = "none"  # "none" | "openai"
     LLM_QUERY_PLANNER_MODEL: str = "gpt-4.1-mini"
@@ -58,6 +59,11 @@ class Settings(BaseSettings):
     LLM_ANSWER_MAX_CONTEXT_CHARS: int = 12000
     LLM_ANSWER_MAX_SNIPPET_CHARS: int = 1200
     LLM_ANSWER_MAX_RESULTS: int = 6
+
+    # Số snippet tối đa đưa vào LLM cho các endpoint CTDT (/query, /review).
+    # Giới hạn riêng để tránh vượt context window và kiểm soát chi phí token,
+    # độc lập với final_limit của retrieval (user có thể set cao hơn).
+    CTDT_LLM_MAX_SNIPPETS: int = 8
 
     # ── Document Synthesis ────────────────────────────────────────
     SYNTHESIS_ENABLED: bool = False
@@ -121,6 +127,27 @@ class Settings(BaseSettings):
     MOODLE_BASE_URL: str = ""
     MOODLE_WSTOKEN: str = ""
     MOODLE_TIMEOUT_S: float = 10.0
+
+    # ── Remote File Download (CTDT ingest from FileServer) ────────
+    RAG_REMOTE_FILE_TIMEOUT_SECONDS: int = 60
+    RAG_REMOTE_FILE_MAX_MB: int = 50
+    RAG_ALLOWED_MIME_TYPES: str = (
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "text/csv,"
+        "text/plain,"
+        "text/markdown"
+    )
+    RAG_DOWNLOAD_USER_AGENT: str = "CTDT-RAG-Server/1.0"
+    # Comma-separated host allowlist for file_url. Empty = allow all (dev only).
+    # Production example: "fileserver.local,fileserver.itcctv-soft.com"
+    RAG_REMOTE_FILE_ALLOWED_HOSTS: str = ""
+
+    # ── Table-aware Extraction (R2) ───────────────────────────────
+    RAG_EXTRACT_MAX_TABLE_ROWS: int = 500
+    RAG_EXTRACT_MAX_TABLE_COLS: int = 50
+    RAG_EXTRACT_INCLUDE_EMPTY_CELLS: bool = False
 
 
 settings = Settings()

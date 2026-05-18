@@ -1,0 +1,3 @@
+# Dev / test dependencies (not needed in production image)
+pytest>=9.0
+pytest-asyncio>=1.3

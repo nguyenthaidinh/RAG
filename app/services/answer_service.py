@@ -116,8 +116,58 @@ class AnswerService:
         "vs",
     )
 
+    CTDT_OBJECTIVE_KEYWORDS = (
+        "mục tiêu",
+        "mục tiêu đào tạo",
+        "mục tiêu chung",
+        "mục tiêu cụ thể",
+        "objectives",
+        "program objectives",
+        "educational objectives",
+    )
+
+    CTDT_OUTCOME_KEYWORDS = (
+        "chuẩn đầu ra",
+        "cđr",
+        "learning outcomes",
+        "elo",
+        "plo",
+        "program outcomes",
+        "kỹ năng đầu ra",
+    )
+
+    CTDT_MAPPING_KEYWORDS = (
+        "ma trận",
+        "mapping",
+        "matrix",
+        "đóng góp",
+        "liên kết",
+        "tương ứng",
+    )
+
+    CTDT_REGULATION_KEYWORDS = (
+        "thông tư",
+        "quy định",
+        "nghị định",
+        "luật giáo dục",
+        "tt17",
+        "tt07",
+        "tt04",
+        "khung trình độ",
+    )
+
     def _detect_intent(self, question: str) -> str:
         q = (question or "").strip().lower()
+        # CTDT-specific intents (check first — more specific)
+        if any(k in q for k in self.CTDT_OBJECTIVE_KEYWORDS):
+            return "ctdt_objective"
+        if any(k in q for k in self.CTDT_OUTCOME_KEYWORDS):
+            return "ctdt_outcome"
+        if any(k in q for k in self.CTDT_MAPPING_KEYWORDS):
+            return "ctdt_mapping"
+        if any(k in q for k in self.CTDT_REGULATION_KEYWORDS):
+            return "ctdt_regulation"
+        # General intents
         if any(k in q for k in self.OVERVIEW_KEYWORDS):
             return "overview"
         if any(k in q for k in self.COMPARE_KEYWORDS):
@@ -189,6 +239,44 @@ class AnswerService:
                 "- The provided context is the PRIMARY source of truth for your answer.\n"
                 "- If the conversation history conflicts with the provided context, ALWAYS follow the provided context.\n"
                 "- Do NOT answer solely from conversation history when provided context is available.\n"
+            )
+
+        if intent == "ctdt_objective":
+            return (
+                base
+                + "\nFor this question about TRAINING OBJECTIVES (mục tiêu đào tạo):\n"
+                + "- State the exact objectives found in the context.\n"
+                + "- Distinguish between general objectives (mục tiêu chung) and specific objectives (mục tiêu cụ thể).\n"
+                + "- Reference the regulation/standard that defines these objectives (TT17, CDIO, AUN-QA).\n"
+                + "- If comparing old vs new, list what changed and why.\n"
+            )
+
+        if intent == "ctdt_outcome":
+            return (
+                base
+                + "\nFor this question about LEARNING OUTCOMES (chuẩn đầu ra):\n"
+                + "- List outcomes with their codes (CĐR1, CĐR2...) if available.\n"
+                + "- Categorize into: Knowledge (kiến thức), Skills (kỹ năng), Autonomy & Responsibility (mức tự chủ).\n"
+                + "- Note the Bloom's taxonomy level if identifiable.\n"
+                + "- Reference which objectives each outcome maps to.\n"
+            )
+
+        if intent == "ctdt_mapping":
+            return (
+                base
+                + "\nFor this question about MAPPING/MATRIX:\n"
+                + "- Identify the exact relationships found in context (which objective maps to which outcome, which outcome maps to which course).\n"
+                + "- Present as structured list: [source] → [target].\n"
+                + "- Note coverage gaps if visible.\n"
+            )
+
+        if intent == "ctdt_regulation":
+            return (
+                base
+                + "\nFor this question about REGULATIONS (quy định, thông tư):\n"
+                + "- Cite the exact article/clause numbers from the regulation.\n"
+                + "- State what the regulation requires in concrete terms.\n"
+                + "- If comparing regulations, state specific differences.\n"
             )
 
         if intent == "overview":

@@ -1,0 +1,138 @@
+{% extends "layout.html" %}
+
+{% block title %}CTĐT API Catalog | AI Server{% endblock %}
+{% block page_title %}CTĐT API Catalog{% endblock %}
+
+{% block content %}
+
+<div class="rag-page-header">
+  <div>
+    <h1>CTĐT API Catalog</h1>
+    <p>Danh mục endpoint phục vụ phân tích CTĐT, mapping draft và truy vấn RAG</p>
+  </div>
+  <span class="badge badge-primary">Phase R6.4-UI-3</span>
+</div>
+
+<div class="cards">
+  {% for metric in metrics %}
+  <div class="card {{ metric.variant }}">
+    <h3>{{ metric.label }}</h3>
+    <p class="stat-number">{{ metric.value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>Filters</h2>
+  <form method="get" action="/dashboard/rag/ctdt" class="rag-catalog-filters">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Search</label>
+        <input type="text" name="q" placeholder="Tìm endpoint, path hoặc mô tả" />
+      </div>
+
+      <div class="form-group">
+        <label>Group</label>
+        <select name="group">
+          {% for group in group_options %}
+          <option value="{% if loop.first %}{% else %}{{ group }}{% endif %}">{{ group }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Method</label>
+        <select name="method">
+          {% for method in method_options %}
+          <option value="{% if loop.first %}{% else %}{{ method }}{% endif %}">{{ method }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Status</label>
+        <select name="status">
+          {% for status in status_options %}
+          <option value="{% if status == 'All' %}{% else %}{{ status }}{% endif %}">{{ status }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="flex gap-1">
+      <button type="submit" class="btn btn-primary">Filter</button>
+      <a href="/dashboard/rag/ctdt" class="btn">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>Endpoint catalog</h2>
+    <span class="badge badge-muted">{{ catalog | length }} endpoints</span>
+  </div>
+
+  <div class="table-container rag-catalog-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Path</th>
+          <th>Group</th>
+          <th>Purpose</th>
+          <th>Status</th>
+          <th>Auth</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in catalog %}
+        <tr>
+          <td>
+            <span class="badge {% if item.method == 'GET' %}badge-primary{% elif item.method == 'POST' %}badge-accent{% else %}badge-muted{% endif %}">
+              {{ item.method }}
+            </span>
+          </td>
+          <td class="mono">{{ item.path }}</td>
+          <td>{{ item.group }}</td>
+          <td>{{ item.purpose }}</td>
+          <td>
+            <span class="badge {% if item.status == 'Available' %}badge-success{% elif item.status == 'Planned' %}badge-warning{% elif item.status == 'Deprecated' %}badge-danger{% else %}badge-muted{% endif %}">
+              {{ item.status }}
+            </span>
+          </td>
+          <td>{{ item.auth }}</td>
+          <td>{{ item.notes }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <h3>Chưa có endpoint trong catalog</h3>
+              <p>Khi có registry thật, danh sách endpoint CTĐT/RAG sẽ xuất hiện tại đây.</p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Integration notes</h2>
+  <div class="rag-catalog-notes">
+    {% for note in integration_notes %}
+    <div class="rag-catalog-note-row">
+      <span class="badge badge-primary">{{ loop.index }}</span>
+      <span>{{ note }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="alert alert-warning rag-note">
+  Phase này dùng catalog static. Phase sau có thể đọc từ OpenAPI schema hoặc cấu hình endpoint registry.
+</div>
+
+{% endblock %}
