@@ -15,7 +15,7 @@ from sqlalchemy.sql import func
 
 from app.db.models.user import Base
 
-
+#test
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
