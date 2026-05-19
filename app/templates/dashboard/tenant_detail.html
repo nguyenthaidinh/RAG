@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+
+{% block title %}Tenant: {{ tenant.id }} | AI Server{% endblock %}
+{% block page_title %}Tenant Detail{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/users.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<div class="section" style="max-width:960px;">
+
+  <!-- Back button -->
+  <div style="margin-bottom: 16px;">
+    <a href="/dashboard/tenants" class="btn" style="padding: 6px 14px; font-size: 13px;">
+      ← Back to Tenants
+    </a>
+  </div>
+
+  <!-- Tenant Info Card -->
+  <div class="card" style="margin-bottom: 24px;">
+    <h2 style="margin-bottom: 16px;">{{ tenant.name }}</h2>
+
+    <div class="table-container">
+      <table>
+        <tbody>
+          <tr>
+            <td style="width:180px;color:var(--muted);font-weight:600;">ID</td>
+            <td><strong>{{ tenant.id }}</strong></td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Name</td>
+            <td>{{ tenant.name }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Status</td>
+            <td>
+              <span class="badge {% if tenant.is_active %}badge-success{% else %}badge-danger{% endif %}">
+                {{ "Active" if tenant.is_active else "Inactive" }}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Max Users</td>
+            <td>{{ tenant.max_users }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Users Count</td>
+            <td>
+              <span class="badge badge-primary">{{ users_count }}</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Created</td>
+            <td>{{ tenant.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);font-weight:600;">Updated</td>
+            <td>{{ tenant.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Users in this Tenant -->
+  <div class="card">
+    <h3 style="margin-bottom: 12px;">Users in this Tenant ({{ users_count }})</h3>
+
+    {% if tenant_users %}
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in tenant_users %}
+          <tr>
+            <td>{{ u.id }}</td>
+            <td><strong>{{ u.email }}</strong></td>
+            <td><span class="badge badge-muted">{{ u.role | upper }}</span></td>
+            <td>
+              <span class="badge {% if u.is_active %}badge-success{% else %}badge-danger{% endif %}">
+                {{ "Active" if u.is_active else "Inactive" }}
+              </span>
+            </td>
+            <td style="font-size: 12px; color: var(--muted);">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+            <td>
+              <a href="/dashboard/users/{{ u.id }}" class="btn" style="padding: 6px 10px; font-size: 12px;">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if users_count > 50 %}
+    <p style="color: var(--muted); font-size: 12px; margin-top: 8px;">
+      Showing 50 most recent users. Total: {{ users_count }}.
+    </p>
+    {% endif %}
+    {% else %}
+    <p style="color: var(--muted); text-align: center; padding: 24px;">
+      No users in this tenant yet.
+    </p>
+    {% endif %}
+  </div>
+
+</div>
+
+{% endblock %}

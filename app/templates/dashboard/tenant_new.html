@@ -1,0 +1,150 @@
+{% extends "layout.html" %}
+
+{% block title %}Create Tenant | AI Server{% endblock %}
+{% block page_title %}Create New Tenant{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/user-form.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<div class="section" style="max-width:720px;">
+
+  <div class="card">
+
+    <h2 style="margin-bottom:6px;">Create new tenant</h2>
+    <p style="color:var(--muted2);margin-bottom:20px;">
+      Tạo tenant mới trong hệ thống
+    </p>
+
+    {% if error %}
+      <div class="alert error">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <form method="post" action="/dashboard/tenants/new" onsubmit="return validateTenantForm()">
+      <!-- CSRF double-submit token (populated by JS from cookie) -->
+      <input type="hidden" name="csrf_token" id="csrf_token" value="" />
+
+      <!-- TENANT ID -->
+      <div class="form-group">
+        <label>Tenant ID</label>
+        <input
+          type="text"
+          name="tenant_id"
+          id="tenant_id"
+          required
+          minlength="3"
+          maxlength="64"
+          pattern="[a-z0-9_\-]+"
+          placeholder="e.g. ctdt, khoa_cntt"
+          value="{{ form_tenant_id | default('') }}"
+        />
+        <small class="muted">
+          Chỉ cho phép chữ thường, số, dấu gạch dưới và dấu gạch ngang (3–64 ký tự)
+        </small>
+      </div>
+
+      <!-- NAME -->
+      <div class="form-group">
+        <label>Name</label>
+        <input
+          type="text"
+          name="name"
+          id="tenant_name"
+          required
+          maxlength="255"
+          placeholder="e.g. Hệ thống cập nhật CTĐT"
+          value="{{ form_name | default('') }}"
+        />
+      </div>
+
+      <!-- MAX USERS -->
+      <div class="form-group">
+        <label>Max Users</label>
+        <input
+          type="number"
+          name="max_users"
+          id="max_users"
+          required
+          min="0"
+          value="{{ form_max_users | default(10) }}"
+        />
+        <small class="muted">
+          Số lượng user tối đa được phép trong tenant (0 = không giới hạn)
+        </small>
+      </div>
+
+      <!-- STATUS -->
+      <div class="form-group">
+        <label>Status</label>
+        <select name="is_active">
+          <option value="true" {% if form_is_active | default('true') == 'true' %}selected{% endif %}>Active</option>
+          <option value="false" {% if form_is_active | default('true') == 'false' %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+
+      <!-- ACTIONS -->
+      <div style="display:flex;gap:12px;margin-top:24px;">
+        <button type="submit" class="btn btn-primary">
+          Create Tenant
+        </button>
+
+        <a href="/dashboard/tenants" class="btn">
+          Cancel
+        </a>
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+<script>
+// Populate CSRF hidden field from double-submit cookie
+(function() {
+  var m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  if (m) {
+    var el = document.getElementById('csrf_token');
+    if (el) el.value = decodeURIComponent(m[1]);
+  }
+})();
+
+function validateTenantForm() {
+  var tid = document.getElementById('tenant_id').value.trim();
+  var name = document.getElementById('tenant_name').value.trim();
+  var maxUsers = parseInt(document.getElementById('max_users').value, 10);
+
+  if (!tid) {
+    alert('Tenant ID is required');
+    return false;
+  }
+
+  if (tid.length < 3 || tid.length > 64) {
+    alert('Tenant ID must be between 3 and 64 characters');
+    return false;
+  }
+
+  if (!/^[a-z0-9_\-]+$/.test(tid)) {
+    alert('Tenant ID may only contain lowercase letters, digits, underscores, and hyphens');
+    return false;
+  }
+
+  if (!name) {
+    alert('Tenant name is required');
+    return false;
+  }
+
+  if (isNaN(maxUsers) || maxUsers < 0) {
+    alert('Max users must be 0 or greater');
+    return false;
+  }
+
+  return true;
+}
+</script>
+
+{% endblock %}

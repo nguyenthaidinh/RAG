@@ -14,6 +14,7 @@ from app.web.csrf import validate_csrf
 from app.web.i18n import get_translator, DEFAULT_LANG, SUPPORTED_LANGS
 from app.services.admin_user_service import AdminUserService
 from app.services.api_key_service import APIKeyService
+from app.services.tenant_admin_service import TenantAdminService
 from app.services.user_service import UserService
 from app.db.session import get_db
 from app.core.rbac import is_admin, is_system_admin
@@ -246,11 +247,19 @@ async def dashboard_user_new(
     except Exception:
         return RedirectResponse("/login")
 
+    # For system_admin: load active tenants for the dropdown
+    tenants = []
+    if is_system_admin(admin.get("role", "")):
+        tenants, _ = await TenantAdminService.list_tenants(
+            db, status="active", page_size=200,
+        )
+
     return templates.TemplateResponse(
         "dashboard/user_new.html",
         {
             "request": request,
             "user": admin,
+            "tenants": tenants,
         },
     )
 
@@ -281,25 +290,32 @@ async def dashboard_user_create(
     if not email.strip():
         return templates.TemplateResponse(
             "dashboard/user_new.html",
-            {"request": request, "user": admin, "error": "Email is required"},
+            {"request": request, "user": admin, "tenants": [], "error": "Email is required"},
             status_code=400,
         )
     if not password:
         return templates.TemplateResponse(
             "dashboard/user_new.html",
-            {"request": request, "user": admin, "error": "Password is required"},
+            {"request": request, "user": admin, "tenants": [], "error": "Password is required"},
             status_code=400,
         )
 
     # Resolve tenant_id: tenant_admin is locked to own tenant
+    _is_sa = is_system_admin(admin.get("role", ""))
     resolved_tenant_id = tenant_id.strip()
-    if not is_system_admin(admin.get("role", "")):
+    if not _is_sa:
         resolved_tenant_id = admin.get("tenant_id", "")
 
     if not resolved_tenant_id:
+        # Reload tenants for system_admin dropdown on error
+        tenants = []
+        if _is_sa:
+            tenants, _ = await TenantAdminService.list_tenants(
+                db, status="active", page_size=200,
+            )
         return templates.TemplateResponse(
             "dashboard/user_new.html",
-            {"request": request, "user": admin, "error": "Tenant ID is required"},
+            {"request": request, "user": admin, "tenants": tenants, "error": "Please select a tenant."},
             status_code=400,
         )
 
@@ -329,11 +345,18 @@ async def dashboard_user_create(
 
     except ValueError as e:
         await db.rollback()
+        # Reload tenants for system_admin dropdown on error
+        tenants = []
+        if is_system_admin(admin.get("role", "")):
+            tenants, _ = await TenantAdminService.list_tenants(
+                db, status="active", page_size=200,
+            )
         return templates.TemplateResponse(
             "dashboard/user_new.html",
             {
                 "request": request,
                 "user": admin,
+                "tenants": tenants,
                 "error": str(e),
             },
             status_code=400,
@@ -341,11 +364,20 @@ async def dashboard_user_create(
 
     except Exception:
         await db.rollback()
+        tenants = []
+        if is_system_admin(admin.get("role", "")):
+            try:
+                tenants, _ = await TenantAdminService.list_tenants(
+                    db, status="active", page_size=200,
+                )
+            except Exception:
+                pass
         return templates.TemplateResponse(
             "dashboard/user_new.html",
             {
                 "request": request,
                 "user": admin,
+                "tenants": tenants,
                 "error": "An unexpected error occurred. Please try again.",
             },
             status_code=500,
@@ -1196,32 +1228,186 @@ async def dashboard_audit(
 # TENANTS LIST (system_admin only)
 # =========================
 @router.get("/dashboard/tenants", response_class=HTMLResponse)
-async def dashboard_tenants(request: Request, db: AsyncSession = Depends(get_db)):
-    return RedirectResponse("/dashboard", status_code=302)
+async def dashboard_tenants(
+    request: Request,
+    q: str | None = None,
+    status: str = "all",
+    page: int = 1,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    if not is_system_admin(admin.get("role", "")):
+        raise HTTPException(status_code=403)
+
+    tenants, total = await TenantAdminService.list_tenants(
+        db, q=q, status=status, page=page, page_size=50,
+    )
+
+    return templates.TemplateResponse(
+        "dashboard/tenants.html",
+        {
+            "request": request,
+            "user": admin,
+            "tenants": tenants,
+            "total": total,
+            "page": page,
+            "q": q or "",
+            "status": status,
+        },
+    )
 
 
 # =========================
 # NEW TENANT (FORM)
 # =========================
 @router.get("/dashboard/tenants/new", response_class=HTMLResponse)
-async def dashboard_tenant_new(request: Request, db: AsyncSession = Depends(get_db)):
-    return RedirectResponse("/dashboard", status_code=302)
+async def dashboard_tenant_new(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    if not is_system_admin(admin.get("role", "")):
+        raise HTTPException(status_code=403)
+
+    return templates.TemplateResponse(
+        "dashboard/tenant_new.html",
+        {
+            "request": request,
+            "user": admin,
+        },
+    )
 
 
 # =========================
 # CREATE TENANT (POST) — CSRF-protected
 # =========================
 @router.post("/dashboard/tenants/new", response_class=HTMLResponse)
-async def dashboard_tenant_create(request: Request, db: AsyncSession = Depends(get_db)):
-    return RedirectResponse("/dashboard", status_code=302)
+async def dashboard_tenant_create(
+    request: Request,
+    tenant_id: str = Form(""),
+    name: str = Form(""),
+    max_users: str = Form("10"),
+    is_active: str = Form("true"),
+    csrf_token: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    if not is_system_admin(admin.get("role", "")):
+        raise HTTPException(status_code=403)
+
+    # CSRF double-submit validation
+    validate_csrf(request, csrf_token)
+
+    # Parse form values
+    is_active_bool = str(is_active).lower() in ("true", "1", "yes")
+    try:
+        max_users_int = int(max_users)
+    except (ValueError, TypeError):
+        max_users_int = 10
+
+    # Load actor for audit
+    actor = await UserService.get_by_id(db, admin["id"])
+
+    try:
+        await TenantAdminService.create_tenant(
+            db,
+            id=tenant_id,
+            name=name,
+            max_users=max_users_int,
+            is_active=is_active_bool,
+            actor=actor,
+        )
+        await db.commit()
+        return RedirectResponse("/dashboard/tenants", status_code=303)
+
+    except ValueError as e:
+        await db.rollback()
+        return templates.TemplateResponse(
+            "dashboard/tenant_new.html",
+            {
+                "request": request,
+                "user": admin,
+                "error": str(e),
+                "form_tenant_id": tenant_id,
+                "form_name": name,
+                "form_max_users": max_users,
+                "form_is_active": is_active,
+            },
+            status_code=400,
+        )
+
+    except Exception:
+        await db.rollback()
+        return templates.TemplateResponse(
+            "dashboard/tenant_new.html",
+            {
+                "request": request,
+                "user": admin,
+                "error": "An unexpected error occurred. Please try again.",
+                "form_tenant_id": tenant_id,
+                "form_name": name,
+                "form_max_users": max_users,
+                "form_is_active": is_active,
+            },
+            status_code=500,
+        )
 
 
 # =========================
 # TENANT DETAIL
 # =========================
 @router.get("/dashboard/tenants/{tenant_id}", response_class=HTMLResponse)
-async def dashboard_tenant_detail(tenant_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    return RedirectResponse("/dashboard", status_code=302)
+async def dashboard_tenant_detail(
+    tenant_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        admin = await get_admin_user_from_cookie(request, db)
+    except Exception:
+        return RedirectResponse("/login")
+
+    if not is_system_admin(admin.get("role", "")):
+        raise HTTPException(status_code=403)
+
+    detail = await TenantAdminService.get_tenant_detail(db, tenant_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Fetch recent users in this tenant (limit 50)
+    from sqlalchemy import select as sa_select
+    from app.db.models.user import User
+    tenant_users = (
+        await db.execute(
+            sa_select(User)
+            .where(User.tenant_id == tenant_id)
+            .order_by(User.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+
+    return templates.TemplateResponse(
+        "dashboard/tenant_detail.html",
+        {
+            "request": request,
+            "user": admin,
+            "tenant": detail["tenant"],
+            "users_count": detail["users_count"],
+            "tenant_users": list(tenant_users),
+        },
+    )
 
 
 # =========================

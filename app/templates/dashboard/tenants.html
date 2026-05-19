@@ -1,0 +1,101 @@
+{% extends "layout.html" %}
+
+{% block title %}Tenant Management | AI Server{% endblock %}
+{% block page_title %}Tenant Management{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ static_url('css/users.css') }}" />
+{% endblock %}
+
+{% block content %}
+
+<!-- =========================
+     SEARCH & FILTER
+     ========================= -->
+<div class="section">
+  <form method="get" action="/dashboard/tenants" class="flex flex-between" style="gap: 12px; flex-wrap: wrap;">
+    <input
+      type="text"
+      name="q"
+      placeholder="Search ID or name..."
+      value="{{ q }}"
+      class="token-box"
+      style="flex: 1; min-width: 200px;"
+    />
+
+    <select name="status" class="token-box" style="width: 150px;">
+      <option value="all" {% if status == "all" %}selected{% endif %}>All Status</option>
+      <option value="active" {% if status == "active" %}selected{% endif %}>Active</option>
+      <option value="inactive" {% if status == "inactive" %}selected{% endif %}>Inactive</option>
+    </select>
+
+    <button type="submit" class="btn btn-primary">Search</button>
+    <a href="/dashboard/tenants" class="btn">Reset</a>
+  </form>
+</div>
+
+<!-- =========================
+     TENANTS TABLE
+     ========================= -->
+<div class="section">
+  <div class="flex flex-between mb-2">
+    <h2>Tenants ({{ total }})</h2>
+    <a href="/dashboard/tenants/new" class="btn btn-primary">+ New Tenant</a>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Max Users</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tenants %}
+        <tr>
+          <td><strong>{{ t.id }}</strong></td>
+          <td>{{ t.name }}</td>
+          <td>{{ t.max_users }}</td>
+          <td>
+            <span class="badge {% if t.is_active %}badge-success{% else %}badge-danger{% endif %}">
+              {{ "Active" if t.is_active else "Inactive" }}
+            </span>
+          </td>
+          <td style="font-size: 12px; color: var(--muted);">{{ t.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            <a href="/dashboard/tenants/{{ t.id }}" class="btn" style="padding: 6px 10px; font-size: 12px;">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" style="text-align: center; padding: 24px; color: var(--muted);">
+            No tenants found
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if total > 50 %}
+  <div class="flex flex-between mt-2" style="color: var(--muted); font-size: 12px;">
+    <span>Page {{ page }} of {{ (total + 49) // 50 }}</span>
+    <div style="gap: 8px; display: flex;">
+      {% if page > 1 %}
+      <a href="/dashboard/tenants?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if status != 'all' %}&status={{ status }}{% endif %}" class="btn" style="padding: 6px 10px;">Previous</a>
+      {% endif %}
+      {% if page * 50 < total %}
+      <a href="/dashboard/tenants?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if status != 'all' %}&status={{ status }}{% endif %}" class="btn" style="padding: 6px 10px;">Next</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

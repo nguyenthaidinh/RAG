@@ -1,4 +1,4 @@
-name: Deploy AI Server to VPS
+name: Deploy RAG Chatbot to VPS
 
 on:
   push:
@@ -6,20 +6,21 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ai-server-deploy-main
+  group: chatbot-deploy-main
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: SSH deploy
+      - name: SSH deploy chatbot
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }} # MUST be administrator
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_SSH_PORT }}
+          host: ${{ secrets.SSH_VPS }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
           timeout: 60s
           command_timeout: 30m
           script_stop: true
@@ -27,30 +28,80 @@ jobs:
           script: |
             set -euo pipefail
 
-            LOCK="/tmp/deploy-ai-server.lock"
+            LOCK="/tmp/deploy-chatbot.lock"
             exec 9>"$LOCK"
-            flock -n 9 || { echo "Another deploy is running"; exit 1; }
+            flock -n 9 || { echo "Another chatbot deploy is running"; exit 1; }
+
+            APP_DIR="/var/www/chatbot"
+            COMPOSE_PROJECT="chatbot"
+            APP_SERVICE="ctdt-ai"
+            DB_SERVICE="ctdt-db"
 
             echo "==> whoami"
             whoami
             id
 
-            APP_DIR="/home/administrator/ctdt-ai-server"
-            VENV_DIR="$APP_DIR/venv"
-
+            echo "==> cd app dir"
             cd "$APP_DIR"
+
+            echo "==> verify required files before deploy"
+            test -f docker-compose.yml || { echo "Missing docker-compose.yml"; exit 1; }
+            test -f .env || { echo "Missing .env on VPS. Refuse to deploy without production env."; exit 1; }
+
+            echo "==> ensure .env is not tracked by git"
+            if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+              echo ".env is tracked by git. Refuse to deploy."
+              exit 1
+            fi
+
+            echo "==> git update"
+            git config --global --add safe.directory "$APP_DIR"
             git fetch --all --prune
             git reset --hard origin/main
 
-            test -f "$VENV_DIR/bin/activate" || { echo "VENV not found: $VENV_DIR"; exit 1; }
-            source "$VENV_DIR/bin/activate"
+            echo "==> verify required files after git reset"
+            test -f docker-compose.yml || { echo "Missing docker-compose.yml after git reset"; exit 1; }
+            test -f .env || { echo "Missing .env after git reset"; exit 1; }
 
-            python -m pip install -U pip wheel setuptools
-            python -m pip install -r requirements.txt
+            echo "==> verify docker compose"
+            docker-compose -p "$COMPOSE_PROJECT" config >/dev/null
 
-            python -m pytest tests/ -x --tb=short || { echo "Tests failed"; exit 1; }
+            echo "==> ensure database service is up"
+            docker-compose -p "$COMPOSE_PROJECT" up -d "$DB_SERVICE"
 
-            sudo -n /usr/bin/systemctl restart ai-server.service
-            sudo -n /usr/bin/systemctl is-active --quiet ai-server.service
+            echo "==> build app image"
+            docker-compose -p "$COMPOSE_PROJECT" build "$APP_SERVICE"
 
-            echo "✅ Deploy OK"
+            echo "==> start/recreate app only"
+            docker-compose -p "$COMPOSE_PROJECT" up -d --no-deps --force-recreate "$APP_SERVICE"
+
+            echo "==> wait app health"
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8100/health/live >/dev/null; then
+                echo "App is alive"
+                break
+              fi
+
+              if [ "$i" -eq 30 ]; then
+                echo "App did not become alive"
+                docker-compose -p "$COMPOSE_PROJECT" ps
+                docker-compose -p "$COMPOSE_PROJECT" logs --tail=120 "$APP_SERVICE"
+                exit 1
+              fi
+
+              sleep 2
+            done
+
+            echo "==> run migrations"
+            docker-compose -p "$COMPOSE_PROJECT" exec -T "$APP_SERVICE" alembic upgrade head
+
+            echo "==> check ready"
+            curl -fsS http://127.0.0.1:8100/health/ready
+
+            echo "==> check nginx proxy"
+            curl -fsS -H "Host: rag.liodev.io.vn" http://127.0.0.1/health/ready
+
+            echo "==> show containers"
+            docker-compose -p "$COMPOSE_PROJECT" ps
+
+            echo "✅ Deploy chatbot OK"

@@ -69,13 +69,23 @@
       <!-- TENANT ID -->
       {% if user.role == "system_admin" %}
         <div class="form-group">
-          <label>Tenant ID</label>
-          <input
-            type="text"
-            name="tenant_id"
-            required
-            placeholder="e.g. tenant_abc"
-          />
+          <label>Tenant</label>
+          {% if tenants %}
+            <select name="tenant_id" id="tenant_select" required>
+              <option value="">-- Select a tenant --</option>
+              {% for t in tenants %}
+                <option value="{{ t.id }}">{{ t.name }} ({{ t.id }})</option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <div class="alert" style="background: var(--warning-bg, #332b00); border-left: 3px solid var(--warning, #f5a623); padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+              <p style="margin:0; color: var(--warning, #f5a623); font-size: 13px;">
+                ⚠ No active tenants found.
+                <a href="/dashboard/tenants/new" style="color: var(--accent); text-decoration: underline;">Create a tenant first</a>.
+              </p>
+            </div>
+            <input type="hidden" name="tenant_id" value="" />
+          {% endif %}
         </div>
       {% else %}
         <input type="hidden" name="tenant_id" value="{{ user.tenant_id }}" />
@@ -140,6 +150,13 @@ function validateForm() {
 
   if (pwd.length < 8) {
     alert("Mật khẩu phải ít nhất 8 ký tự");
+    return false;
+  }
+
+  // Validate tenant selection for system_admin
+  var tenantSelect = document.getElementById("tenant_select");
+  if (tenantSelect && !tenantSelect.value) {
+    alert("Please select a tenant");
     return false;
   }
 
