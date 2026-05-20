@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     LLM_ANSWER_TIMEOUT_S: float = 12.0
     LLM_ANSWER_MAX_TOKENS: int = 600
     LLM_ANSWER_TEMPERATURE: float = 0.2
-    LLM_ANSWER_MAX_CONTEXT_CHARS: int = 12000
-    LLM_ANSWER_MAX_SNIPPET_CHARS: int = 1200
+    LLM_ANSWER_MAX_CONTEXT_CHARS: int = 12000000
+    LLM_ANSWER_MAX_SNIPPET_CHARS: int = 12000000
     LLM_ANSWER_MAX_RESULTS: int = 6
 
     # Số snippet tối đa đưa vào LLM cho các endpoint CTDT (/query, /review).
@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     # ── Remote File Download (CTDT ingest from FileServer) ────────
     RAG_REMOTE_FILE_TIMEOUT_SECONDS: int = 60
     RAG_REMOTE_FILE_MAX_MB: int = 50
+    MAX_EXTRACTED_TEXT_CHARS: int = 3_000_000
     RAG_ALLOWED_MIME_TYPES: str = (
         "application/pdf,"
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
