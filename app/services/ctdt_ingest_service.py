@@ -463,7 +463,7 @@ async def ingest_from_url(
             data,
             limits=ExtractLimits(
                 max_bytes=settings.RAG_REMOTE_FILE_MAX_MB * 1024 * 1024,
-                max_chars=1_000_000,
+                max_chars=settings.RAG_EXTRACT_MAX_TEXT_CHARS,
                 max_text_bytes=5 * 1024 * 1024,
             ),
             table_limits=TableLimits(

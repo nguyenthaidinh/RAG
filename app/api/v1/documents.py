@@ -171,7 +171,7 @@ async def upload_document(
             data,
             limits=ExtractLimits(
                 max_bytes=15 * 1024 * 1024,
-                max_chars=1_000_000,
+                max_chars=settings.RAG_EXTRACT_MAX_TEXT_CHARS,
                 max_text_bytes=5 * 1024 * 1024,
             ),
         )

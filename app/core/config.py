@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     # ── Remote File Download (CTDT ingest from FileServer) ────────
     RAG_REMOTE_FILE_TIMEOUT_SECONDS: int = 60
     RAG_REMOTE_FILE_MAX_MB: int = 50
-    MAX_EXTRACTED_TEXT_CHARS: int = 3_000_000
+    RAG_EXTRACT_MAX_TEXT_CHARS: int = 10_000_000
     RAG_ALLOWED_MIME_TYPES: str = (
         "application/pdf,"
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
