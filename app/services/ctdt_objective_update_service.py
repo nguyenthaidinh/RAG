@@ -53,6 +53,12 @@ class ObjectiveDraftResult:
     source_summary: ObjectiveSourceSummary
     generation_status: str = "needs_generation"
     warnings: list[str] | None = None
+    # R6.5: Adapted flat output for Laravel UI
+    general_objective: str = ""
+    specific_objectives: list[str] | None = None
+    source_summary_flat: dict[str, Any] | None = None
+    debug: dict[str, Any] | None = None
+
 
 
 # ── Main orchestrator ────────────────────────────────────────────────
@@ -70,6 +76,7 @@ async def generate_objective_update_draft(
     top_k_per_role: int = 5,
     user_instruction: str | None = None,
     save_draft: bool = False,
+    debug_context: bool = False,
     query_svc: Any = None,
 ) -> ObjectiveDraftResult:
     """
@@ -169,7 +176,43 @@ async def generate_objective_update_draft(
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
-    # ── Step 4: Optional draft save ──────────────────────────────
+    # ── Step 4: Adapter + Quality Check (R6.5) ───────────────────
+    # Run BEFORE save so _flat can be persisted into result_payload.
+    from app.services.ctdt_objective_quality_service import (
+        adapt_objective_payload,
+        build_debug_context,
+        check_objective_quality,
+    )
+
+    adapted = adapt_objective_payload(
+        payload=payload,
+        context_pack_summary=context_pack_summary,
+        program_name=program_name,
+        program_code=program_code,
+        generation_status=generation_status,
+        extra_warnings=generation_warnings,
+    )
+
+    has_evidence = bool(context_pack.evidence_contexts)
+    has_current = bool(context_pack.current_objective_contexts)
+    quality_warnings = check_objective_quality(
+        general_objective=adapted.general_objective,
+        specific_objectives=adapted.specific_objectives,
+        program_name=program_name,
+        has_evidence_context=has_evidence,
+        has_current_curriculum_context=has_current,
+    )
+    all_warnings = adapted.warnings + quality_warnings
+
+    # Build _flat block for DB persistence (no debug, no used_chunks)
+    flat_block: dict[str, Any] = {
+        "general_objective": adapted.general_objective,
+        "specific_objectives": adapted.specific_objectives,
+        "source_summary": adapted.source_summary,
+        "warnings": all_warnings,
+    }
+
+    # ── Step 5: Optional draft save ──────────────────────────────
     draft_id = None
     draft_saved = False
 
@@ -191,6 +234,7 @@ async def generate_objective_update_draft(
                         "generation_status": generation_status,
                         "warnings": generation_warnings,
                     },
+                    "_flat": flat_block,
                 },
                 source_summary={
                     "contexts_count": total_contexts,
@@ -234,6 +278,15 @@ async def generate_objective_update_draft(
         total_contexts, len(all_doc_ids), elapsed_ms, draft_saved,
     )
 
+    # ── Step 6: Debug context (never stored in DB) ───────────────
+    debug_info = None
+    if debug_context:
+        debug_info = build_debug_context(
+            context_pack=context_pack,
+            queries_used=getattr(context_pack, "queries_used", []),
+            fallback_used=getattr(context_pack, "fallback_used", False),
+        )
+
     return ObjectiveDraftResult(
         update_cycle_id=update_cycle_id,
         program_code=program_code,
@@ -250,5 +303,9 @@ async def generate_objective_update_draft(
             latency_ms=elapsed_ms,
         ),
         generation_status=generation_status,
-        warnings=generation_warnings,
+        warnings=all_warnings,
+        general_objective=adapted.general_objective,
+        specific_objectives=adapted.specific_objectives,
+        source_summary_flat=adapted.source_summary,
+        debug=debug_info,
     )

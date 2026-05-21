@@ -1845,6 +1845,11 @@ class ObjectiveDraftRequest(BaseModel):
         default=None, max_length=2000,
         description="Hướng dẫn bổ sung cho AI khi sinh mục tiêu.",
     )
+    # R6.5
+    debug_context: bool = Field(
+        default=False,
+        description="Bật debug context để kiểm tra chunks đã dùng.",
+    )
 
 
 class ObjectiveDraftSourceSummaryResponse(BaseModel):
@@ -1866,6 +1871,11 @@ class ObjectiveDraftResponse(BaseModel):
     source_summary: ObjectiveDraftSourceSummaryResponse
     generation_status: str = "needs_generation"
     warnings: list[str] = Field(default_factory=list)
+    # R6.5: Flat adapted fields for Laravel
+    general_objective: str = ""
+    specific_objectives: list[str] = Field(default_factory=list)
+    source_summary_flat: dict[str, Any] | None = None
+    debug: dict[str, Any] | None = None
 
 
 @router.post(
@@ -1880,10 +1890,10 @@ async def generate_objectives_draft(
     query_svc=Depends(_get_query_svc),
 ):
     """
-    R6.1B — Sinh bản nháp cập nhật mục tiêu đào tạo.
+    R6.1B + R6.5 — Sinh bản nháp cập nhật mục tiêu đào tạo.
 
-    Dùng context pack R6.1A → ObjectiveUpdateSkill → trả JSON đề xuất.
-    Không sinh CĐR. Không ghi dữ liệu chính thức.
+    Dùng context pack R6.1A → ObjectiveUpdateSkill → adapter → quality check.
+    Response bao gồm cả payload gốc (backward compat) lẫn format phẳng cho Laravel.
     """
     from app.services.ctdt_objective_update_service import (
         generate_objective_update_draft,
@@ -1901,6 +1911,7 @@ async def generate_objectives_draft(
             top_k_per_role=body.top_k_per_role,
             user_instruction=body.user_instruction,
             save_draft=body.save_draft,
+            debug_context=body.debug_context,
             query_svc=query_svc,
         )
     except Exception as exc:
@@ -1935,7 +1946,161 @@ async def generate_objectives_draft(
         ),
         generation_status=result.generation_status,
         warnings=result.warnings or [],
+        general_objective=result.general_objective,
+        specific_objectives=result.specific_objectives or [],
+        source_summary_flat=result.source_summary_flat,
+        debug=result.debug,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# R6.5: Latest Objective Draft
+# ──────────────────────────────────────────────────────────────────────────────
+
+_VALID_OBJECTIVE_DRAFT_MODES = {"design"}
+
+
+class ObjectiveDraftLatestResponse(BaseModel):
+    """Response phẳng cho GET latest objective draft."""
+    success: bool = True
+    data: dict[str, Any]
+
+
+@router.get(
+    "/update-cycles/{update_cycle_id}/objectives-draft/latest",
+    response_model=ObjectiveDraftLatestResponse,
+    responses={
+        404: {"description": "Không tìm thấy objective draft"},
+        422: {"description": "analysis_mode không hợp lệ"},
+        500: {"description": "Lỗi DB"},
+    },
+)
+async def get_latest_objective_draft(
+    update_cycle_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    program_id: str | None = None,
+    program_code: str | None = None,
+    analysis_mode: str = "design",
+    status: str = "draft",
+):
+    """
+    R6.5 — Lấy objective draft mới nhất, trả format phẳng.
+
+    Read-only. Không gọi LLM. Không rebuild context pack.
+
+    Ưu tiên đọc "_flat" block đã lưu khi save_draft=true.
+    Nếu draft cũ chưa có "_flat" → fallback adapter.
+
+    Debug context không khả dụng ở endpoint này vì không rebuild
+    context pack. Muốn xem debug context → gọi POST objectives-draft
+    với debug_context=true.
+    """
+    # Validate analysis_mode
+    if analysis_mode not in _VALID_OBJECTIVE_DRAFT_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_analysis_mode",
+                "message": (
+                    f"analysis_mode phải là một trong: "
+                    f"{', '.join(_VALID_OBJECTIVE_DRAFT_MODES)}. "
+                    f"Nhận: '{analysis_mode}'"
+                ),
+                "retryable": False,
+            },
+        )
+
+    from app.services.ctdt_analysis_draft_service import get_latest_analysis_draft
+
+    try:
+        draft = await get_latest_analysis_draft(
+            db,
+            tenant_id=user.tenant_id,
+            update_cycle_id=update_cycle_id,
+            program_id=program_id,
+            program_code=program_code,
+            analysis_mode=analysis_mode,
+            draft_type="objective_update",
+            status=status,
+        )
+    except Exception as exc:
+        logger.error(
+            "ctdt.objective_draft_latest_failed tenant_id=%s cycle=%s: %s",
+            user.tenant_id, update_cycle_id, exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "objective_draft_latest_error",
+                "message": "Lỗi lấy objective draft mới nhất.",
+                "retryable": True,
+            },
+        )
+
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "objective_draft_not_found",
+                "message": "Không tìm thấy objective draft trong phạm vi yêu cầu.",
+                "retryable": False,
+            },
+        )
+
+    # ── R6.5-PATCH-1: Prefer _flat if available ──────────────────
+    raw_payload = draft.result_payload or {}
+    flat = raw_payload.get("_flat")
+
+    if isinstance(flat, dict):
+        # Draft was saved with _flat → use pre-computed values
+        general_objective = flat.get("general_objective") or ""
+        specific_objectives = flat.get("specific_objectives") or []
+        source_summary = flat.get("source_summary") or {}
+        warnings = flat.get("warnings") or []
+    else:
+        # Old draft without _flat → fallback to adapter
+        from app.services.ctdt_objective_quality_service import (
+            adapt_objective_payload,
+            check_objective_quality,
+        )
+
+        meta = raw_payload.get("_meta", {})
+        generation_status = meta.get("generation_status", "draft")
+
+        adapted = adapt_objective_payload(
+            payload=raw_payload,
+            program_name=draft.program_name,
+            program_code=draft.program_code,
+            generation_status=generation_status,
+        )
+
+        quality_warnings = check_objective_quality(
+            general_objective=adapted.general_objective,
+            specific_objectives=adapted.specific_objectives,
+            program_name=draft.program_name,
+        )
+        general_objective = adapted.general_objective
+        specific_objectives = adapted.specific_objectives
+        source_summary = adapted.source_summary
+        warnings = adapted.warnings + quality_warnings
+
+    data: dict[str, Any] = {
+        "draft_id": draft.id,
+        "status": draft.status,
+        "general_objective": general_objective,
+        "specific_objectives": specific_objectives,
+        "source_summary": source_summary,
+        "warnings": warnings,
+        "debug": None,
+        "raw_payload": raw_payload,
+        "created_at": str(draft.created_at) if draft.created_at else None,
+        "updated_at": str(draft.updated_at) if draft.updated_at else None,
+    }
+
+    return ObjectiveDraftLatestResponse(success=True, data=data)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

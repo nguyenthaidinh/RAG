@@ -129,8 +129,9 @@ class TestMultiRoleRetrieval:
                 program_code="7480201",
             )
 
-        # Should have called retrieve 5 times (one per role group)
-        assert len(calls) == 5
+        # R6.5: multi-query means more calls per group (especially current_objective)
+        # The important invariant is that all 5 role groups were queried.
+        assert len(calls) >= 5
         # Verify role groups called
         all_roles = [c["roles"] for c in calls]
         assert ["current_curriculum"] in all_roles

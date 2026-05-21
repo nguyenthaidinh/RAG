@@ -44,7 +44,7 @@ class ObjectiveUpdateStatus:
 
 @dataclass
 class ObjectiveUpdatePayload:
-    """Full payload matching the R6.1B output JSON schema."""
+    """Full payload matching the R6.1B + R6.5 output JSON schema."""
     objective_update_strategy: dict[str, Any] = field(default_factory=dict)
     current_objective_analysis: list[dict[str, Any]] = field(default_factory=list)
     proposed_objectives: list[dict[str, Any]] = field(default_factory=list)
@@ -53,6 +53,9 @@ class ObjectiveUpdatePayload:
     missing_information: list[dict[str, Any]] = field(default_factory=list)
     risks: list[dict[str, Any]] = field(default_factory=list)
     next_actions: list[dict[str, Any]] = field(default_factory=list)
+    # R6.5: Direct flat output for Laravel binding
+    general_objective_text: str = ""
+    specific_objective_texts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -71,13 +74,35 @@ Bạn là chuyên gia tư vấn thiết kế chương trình đào tạo đại 
 chuyên sâu về MỤC TIÊU ĐÀO TẠO.
 
 NHIỆM VỤ: Dựa trên CTĐT hiện hành, chỉ đạo của nhà trường, quy định pháp lý, \
-khảo sát bên liên quan, và đối sánh → ĐỀ XUẤT cập nhật mục tiêu đào tạo.
+khảo sát bên liên quan, và đối sánh → VIẾT mục tiêu đào tạo cập nhật.
 
 MỤC TIÊU ĐÀO TẠO LÀ GÌ:
 - Là định hướng CẤP CHƯƠNG TRÌNH (không phải cấp học phần).
 - Mô tả người học sau tốt nghiệp có thể phát triển theo HƯỚNG NÀO.
 - Thể hiện năng lực nghề nghiệp, phẩm chất, vai trò xã hội ở MỨC TỔNG QUÁT.
 - Là nền để dẫn xuất chuẩn đầu ra (CĐR), KHÔNG PHẢI CĐR.
+
+YÊU CẦU VỀ VĂN PHONG VÀ NỘI DUNG:
+- Viết bằng tiếng Việt học thuật, trang trọng, phù hợp văn bản CTĐT đại học.
+- KHÔNG viết chung chung áp dụng cho mọi ngành — phải bám vào ngành/chuyên ngành \
+phát hiện trong tài liệu.
+- Nếu không xác định được ngành/chương trình, thêm missing_information thay vì tự bịa.
+- KHÔNG biến mục tiêu đào tạo thành chuẩn đầu ra. KHÔNG liệt kê chi tiết như CLO/PLO.
+- Nếu context có thông tin cụ thể về ngành, công nghệ, nghiệp vụ, môi trường làm việc, \
+vị trí việc làm → đưa vào nội dung ở mức mục tiêu đào tạo.
+- TRÁNH các câu rỗng như: "có kiến thức và kỹ năng cần thiết", \
+"đáp ứng nhu cầu xã hội", "có phẩm chất đạo đức tốt" nếu không có phần cụ thể đi kèm.
+
+YÊU CẦU VỀ CẤU TRÚC MỤC TIÊU:
+- general_objective_text: MỘT ĐOẠN VĂN hoàn chỉnh, khoảng 120-180 từ, mô tả tổng quát \
+mục tiêu đào tạo của chương trình. Phải đề cập ngành/lĩnh vực cụ thể.
+- specific_objective_texts: DANH SÁCH 4-6 mục tiêu cụ thể, mỗi mục 1-2 câu. \
+Phải bao phủ các khía cạnh sau:
+  1. Kiến thức nền tảng và chuyên môn (đặc thù ngành)
+  2. Kỹ năng nghề nghiệp/thực hành
+  3. Năng lực ứng dụng, phân tích, thiết kế, giải quyết vấn đề
+  4. Thái độ, đạo đức nghề nghiệp, trách nhiệm xã hội
+  5. Khả năng tự học, nghiên cứu, thích ứng với thay đổi (nếu phù hợp)
 
 QUY TẮC BẮT BUỘC:
 1. CHỈ đề xuất dựa trên các đoạn trích (contexts) được cung cấp.
@@ -96,6 +121,14 @@ VÀ thêm quality_flags: ["missing_evidence"].
 
 OUTPUT FORMAT (JSON):
 {
+  "general_objective_text": "Một đoạn văn hoàn chỉnh 120-180 từ mô tả mục tiêu chung \
+của chương trình đào tạo, bám sát ngành/chuyên ngành cụ thể.",
+  "specific_objective_texts": [
+    "Mục tiêu cụ thể 1: Kiến thức nền tảng và chuyên môn...",
+    "Mục tiêu cụ thể 2: Kỹ năng nghề nghiệp/thực hành...",
+    "Mục tiêu cụ thể 3: Năng lực ứng dụng...",
+    "Mục tiêu cụ thể 4: Thái độ, đạo đức nghề nghiệp..."
+  ],
   "objective_update_strategy": {
     "summary": "Tóm tắt chiến lược cập nhật mục tiêu (2-3 câu)",
     "main_drivers": ["school_direction","legal_regulation","stakeholder_need",\
@@ -175,6 +208,19 @@ Chỉ trả JSON, không giải thích thêm.\
 """
 
 
+# R6.5: Variable context char limits per role group
+_CONTEXT_CHAR_LIMITS: dict[str, int] = {
+    "current_objective": 2500,
+    "direction": 1200,
+    "evidence": 1200,
+    "comparison": 1200,
+    "legal": 900,
+}
+_DEFAULT_CHAR_LIMIT = 800
+# Safety net: total context chars to avoid prompt overflow
+_MAX_TOTAL_CONTEXT_CHARS = 14000
+
+
 def _build_user_prompt(
     *,
     program_name: str | None,
@@ -197,6 +243,7 @@ def _build_user_prompt(
     source_map: dict[str, list] = {}
     all_parts: list[str] = []
     global_idx = 0
+    total_chars = 0
 
     groups = [
         ("current_objective", context_pack.current_objective_contexts,
@@ -216,10 +263,20 @@ def _build_user_prompt(
             all_parts.append(f"\n=== {label} ===\n(Không có dữ liệu)")
             continue
 
+        # R6.5: Variable char limit per group
+        char_limit = _CONTEXT_CHAR_LIMITS.get(group_key, _DEFAULT_CHAR_LIMIT)
+
         all_parts.append(f"\n=== {label} ===")
         group_sources = []
         for item in items:
-            text = item.text[:800] if item.text else "(trống)"
+            # R6.5: Apply per-group char limit and total safety net
+            remaining = _MAX_TOTAL_CONTEXT_CHARS - total_chars
+            if remaining <= 0:
+                break
+            effective_limit = min(char_limit, remaining)
+            text = item.text[:effective_limit] if item.text else "(trống)"
+            total_chars += len(text)
+
             fname = item.filename or "N/A"
             role = item.document_role or "unknown"
             all_parts.append(
@@ -629,6 +686,16 @@ class ObjectiveUpdateSkill:
                 "priority": _safe_str(raw.get("priority"), "medium"),
             })
 
+        # R6.5: Extract direct flat output fields
+        general_text = _safe_str(data.get("general_objective_text"))
+        specific_texts_raw = data.get("specific_objective_texts")
+        specific_texts: list[str] = []
+        if isinstance(specific_texts_raw, list):
+            specific_texts = [
+                _safe_str(s) for s in specific_texts_raw
+                if isinstance(s, str) and s.strip()
+            ]
+
         payload = ObjectiveUpdatePayload(
             objective_update_strategy=strategy,
             current_objective_analysis=current_analysis,
@@ -638,7 +705,10 @@ class ObjectiveUpdateSkill:
             missing_information=missing_info,
             risks=risks,
             next_actions=next_actions,
+            general_objective_text=general_text,
+            specific_objective_texts=specific_texts,
         )
+
 
         status = (
             ObjectiveUpdateStatus.GENERATED
