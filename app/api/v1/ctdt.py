@@ -1850,6 +1850,15 @@ class ObjectiveDraftRequest(BaseModel):
         default=False,
         description="Bật debug context để kiểm tra chunks đã dùng.",
     )
+    # R6.5C: Dynamic objective count
+    objective_count: int = Field(
+        default=6, ge=4, le=8,
+        description="Số lượng mục tiêu cụ thể cần sinh (4-8, mặc định 6).",
+    )
+    force_refresh: bool = Field(
+        default=False,
+        description="Buộc sinh lại ngay cả khi đã có draft.",
+    )
 
 
 class ObjectiveDraftSourceSummaryResponse(BaseModel):
@@ -1873,9 +1882,16 @@ class ObjectiveDraftResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # R6.5: Flat adapted fields for Laravel
     general_objective: str = ""
-    specific_objectives: list[str] = Field(default_factory=list)
+    specific_objectives: list[Any] = Field(default_factory=list)
     source_summary_flat: dict[str, Any] | None = None
     debug: dict[str, Any] | None = None
+    # R6.5C: Structured objective fields
+    objective_count: int = 6
+    format_profile: str = ""
+    general_objective_text: str = ""
+    specific_objective_texts: list[str] = Field(default_factory=list)
+    quality_level: str = "good"
+    quality_messages: list[str] = Field(default_factory=list)
 
 
 @router.post(
@@ -1913,6 +1929,7 @@ async def generate_objectives_draft(
             save_draft=body.save_draft,
             debug_context=body.debug_context,
             query_svc=query_svc,
+            objective_count=body.objective_count,
         )
     except Exception as exc:
         logger.error(
@@ -1950,6 +1967,13 @@ async def generate_objectives_draft(
         specific_objectives=result.specific_objectives or [],
         source_summary_flat=result.source_summary_flat,
         debug=result.debug,
+        # R6.5C fields
+        objective_count=result.objective_count,
+        format_profile=result.format_profile,
+        general_objective_text=result.general_objective_text,
+        specific_objective_texts=result.specific_objective_texts or [],
+        quality_level=result.quality_level,
+        quality_messages=result.quality_messages or [],
     )
 
 
@@ -2060,6 +2084,16 @@ async def get_latest_objective_draft(
         specific_objectives = flat.get("specific_objectives") or []
         source_summary = flat.get("source_summary") or {}
         warnings = flat.get("warnings") or []
+        # R6.5C-HARDEN-1: metadata from _flat
+        objective_count = flat.get("objective_count", 6)
+        format_profile = flat.get("format_profile", "")
+        quality_level = flat.get("quality_level", "good")
+        quality_messages = flat.get("quality_messages", [])
+        general_objective_text = flat.get(
+            "general_objective_text", general_objective,
+        )
+        specific_objective_texts = flat.get("specific_objective_texts", [])
+        evidence_quality = flat.get("evidence_quality", "moderate")
     else:
         # Old draft without _flat → fallback to adapter
         from app.services.ctdt_objective_quality_service import (
@@ -2087,6 +2121,23 @@ async def get_latest_objective_draft(
         source_summary = adapted.source_summary
         warnings = adapted.warnings + quality_warnings
 
+        # R6.5C-HARDEN-1: safe defaults for old drafts
+        objective_count = meta.get("objective_count", 6)
+        format_profile = meta.get("format_profile", "")
+        quality_level = "warning" if warnings else "good"
+        quality_messages = list(warnings) if warnings else []
+        general_objective_text = general_objective
+        evidence_quality = "moderate"
+        # Build specific_objective_texts from specific_objectives
+        specific_objective_texts = []
+        for so in specific_objectives:
+            if isinstance(so, dict):
+                specific_objective_texts.append(
+                    f"{so.get('code', '')}. {so.get('text', '')}"
+                )
+            elif isinstance(so, str):
+                specific_objective_texts.append(so)
+
     data: dict[str, Any] = {
         "draft_id": draft.id,
         "status": draft.status,
@@ -2098,6 +2149,14 @@ async def get_latest_objective_draft(
         "raw_payload": raw_payload,
         "created_at": str(draft.created_at) if draft.created_at else None,
         "updated_at": str(draft.updated_at) if draft.updated_at else None,
+        # R6.5C-HARDEN-1: metadata fields
+        "objective_count": objective_count,
+        "format_profile": format_profile,
+        "quality_level": quality_level,
+        "quality_messages": quality_messages,
+        "general_objective_text": general_objective_text,
+        "specific_objective_texts": specific_objective_texts,
+        "evidence_quality": evidence_quality,
     }
 
     return ObjectiveDraftLatestResponse(success=True, data=data)

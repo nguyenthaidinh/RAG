@@ -85,6 +85,7 @@ def adapt_objective_payload(
     program_code: str | None = None,
     generation_status: str = "needs_generation",
     extra_warnings: list[str] | None = None,
+    objective_count: int = 6,
 ) -> ObjectiveAdaptedResult:
     """
     Chuyển raw objective payload (từ ObjectiveUpdateSkill) sang format phẳng.
@@ -103,14 +104,37 @@ def adapt_objective_payload(
     direct_general = (payload.get("general_objective_text") or "").strip()
     direct_specifics = payload.get("specific_objective_texts")
 
-    if direct_general:
+    # R6.5C: Check for structured objectives (list of dicts with code/group/text)
+    structured_general = (payload.get("general_objective") or "").strip()
+    structured_specifics = payload.get("specific_objectives_structured")
+    r65c_objective_count = payload.get("objective_count", objective_count)
+    r65c_format_profile = payload.get("format_profile", "")
+
+    # Build structured specific_objectives list for Laravel
+    specific_objectives_for_laravel: list[dict[str, Any]] = []
+    specific_objective_texts_for_laravel: list[str] = []
+
+    if isinstance(structured_specifics, list) and structured_specifics:
+        # R6.5C path: structured objectives available
+        general_objective = structured_general or direct_general
+        for item in structured_specifics:
+            if isinstance(item, dict) and item.get("code") and item.get("text"):
+                specific_objectives_for_laravel.append({
+                    "code": item["code"],
+                    "group": item.get("group", ""),
+                    "text": item["text"],
+                })
+                specific_objective_texts_for_laravel.append(
+                    f"{item['code']}. {item['text']}"
+                )
+    elif direct_general:
         general_objective = direct_general
         if isinstance(direct_specifics, list):
-            specific_objectives = [
-                s.strip() for s in direct_specifics
-                if isinstance(s, str) and s.strip()
-            ]
+            for s in direct_specifics:
+                if isinstance(s, str) and s.strip():
+                    specific_objective_texts_for_laravel.append(s.strip())
     else:
+        general_objective = structured_general
         # ── Priority 2: Phân loại từ proposed_objectives ─────────────
         proposed = payload.get("proposed_objectives", [])
         if isinstance(proposed, list) and proposed:
@@ -135,14 +159,14 @@ def adapt_objective_payload(
 
             if generals:
                 general_objective = " ".join(generals)
-                specific_objectives = specifics
+                specific_objective_texts_for_laravel = specifics
             elif specifics:
                 # Không có general rõ ràng → heuristic: mục dài nhất → general
                 sorted_by_len = sorted(
                     specifics, key=len, reverse=True,
                 )
                 general_objective = sorted_by_len[0]
-                specific_objectives = sorted_by_len[1:]
+                specific_objective_texts_for_laravel = sorted_by_len[1:]
                 warnings.append(
                     "Không xác định rõ mục tiêu chung từ AI. "
                     "Hệ thống đã tự phân loại, cần rà soát lại."
@@ -160,9 +184,21 @@ def adapt_objective_payload(
         program_code=program_code,
     )
 
+    # R6.5C: Add objective_count and format_profile to source_summary
+    source_summary["objective_count"] = r65c_objective_count
+    source_summary["format_profile"] = r65c_format_profile
+
+    # R6.5C: Build the combined specific_objectives for Laravel
+    # If structured list is available, use it; otherwise fall back to texts
+    final_specific_objectives: list[dict[str, Any]] | list[str]
+    if specific_objectives_for_laravel:
+        final_specific_objectives = specific_objectives_for_laravel
+    else:
+        final_specific_objectives = specific_objective_texts_for_laravel
+
     return ObjectiveAdaptedResult(
         general_objective=general_objective,
-        specific_objectives=specific_objectives,
+        specific_objectives=final_specific_objectives,
         warnings=warnings,
         source_summary=source_summary,
         raw_payload=payload,
@@ -204,10 +240,11 @@ def _build_source_summary(
 def check_objective_quality(
     *,
     general_objective: str,
-    specific_objectives: list[str],
+    specific_objectives: list,
     program_name: str | None = None,
     has_evidence_context: bool = True,
     has_current_curriculum_context: bool = True,
+    objective_count: int = 6,
 ) -> list[str]:
     """
     Kiểm tra chất lượng nhẹ bằng code. Trả list warnings tiếng Việt.
@@ -223,19 +260,25 @@ def check_objective_quality(
             "Cần kiểm tra tài liệu đầu vào hoặc thử lại."
         )
 
-    # 2. specific_objectives ít nhất 4 mục
+    # 2. specific_objectives count check (R6.5C: dynamic threshold)
     num_specific = len(specific_objectives)
-    if num_specific < 4:
+    if num_specific < objective_count and num_specific > 0:
         warnings.append(
-            f"Chỉ có {num_specific} mục tiêu cụ thể (khuyến nghị 4-6 mục). "
+            f"Chỉ có {num_specific}/{objective_count} mục tiêu cụ thể. "
             "Cần bổ sung thêm mục tiêu cụ thể."
         )
-
-    # 3. Quá nhiều mục
-    if num_specific > 6:
+    elif num_specific == 0 and general_objective.strip():
         warnings.append(
-            f"Có {num_specific} mục tiêu cụ thể (khuyến nghị tối đa 6 mục). "
-            "Cần xem xét gộp hoặc lược bớt."
+            "Chưa sinh được mục tiêu cụ thể nào. "
+            "Cần kiểm tra tài liệu đầu vào."
+        )
+
+    # 3. Quá nhiều mục (R6.5C: check against requested count)
+    if num_specific > objective_count:
+        warnings.append(
+            f"Có {num_specific} mục tiêu cụ thể "
+            f"(yêu cầu {objective_count} mục). "
+            "Cần xem xét lược bớt."
         )
 
     # 4. Nội dung quá chung chung
@@ -254,8 +297,15 @@ def check_objective_quality(
     if program_name and general_objective.strip():
         # Kiểm tra xem có dấu hiệu ngành/lĩnh vực không
         name_lower = program_name.lower()
+        # R6.5C: Extract text from objectives (may be str or dict)
+        spec_texts = []
+        for s in specific_objectives:
+            if isinstance(s, dict):
+                spec_texts.append(s.get("text", ""))
+            elif isinstance(s, str):
+                spec_texts.append(s)
         all_text = (
-            general_objective + " " + " ".join(specific_objectives)
+            general_objective + " " + " ".join(spec_texts)
         ).lower()
 
         # Trích từ khóa từ program_name (tách bỏ stop words)
@@ -290,7 +340,8 @@ def check_objective_quality(
     # 8. Specific objectives quá giống CĐR
     outcome_like_count = 0
     for spec in specific_objectives:
-        spec_lower = spec.lower()
+        spec_text = spec.get("text", "") if isinstance(spec, dict) else str(spec)
+        spec_lower = spec_text.lower()
         verb_hits = sum(1 for v in _OUTCOME_VERBS if v in spec_lower)
         if verb_hits >= 3:
             outcome_like_count += 1

@@ -55,9 +55,16 @@ class ObjectiveDraftResult:
     warnings: list[str] | None = None
     # R6.5: Adapted flat output for Laravel UI
     general_objective: str = ""
-    specific_objectives: list[str] | None = None
+    specific_objectives: list | None = None
     source_summary_flat: dict[str, Any] | None = None
     debug: dict[str, Any] | None = None
+    # R6.5C: Structured objective fields
+    objective_count: int = 6
+    format_profile: str = ""
+    general_objective_text: str = ""
+    specific_objective_texts: list[str] | None = None
+    quality_level: str = "good"
+    quality_messages: list[str] | None = None
 
 
 
@@ -78,6 +85,7 @@ async def generate_objective_update_draft(
     save_draft: bool = False,
     debug_context: bool = False,
     query_svc: Any = None,
+    objective_count: int = 6,
 ) -> ObjectiveDraftResult:
     """
     Orchestrate objective update draft generation.
@@ -123,6 +131,9 @@ async def generate_objective_update_draft(
 
     skill = ObjectiveUpdateSkill()
 
+    # R6.5C: clamp objective_count
+    objective_count = max(4, min(8, objective_count))
+
     try:
         skill_result: ObjectiveUpdateResult = await skill.run(
             update_cycle_id=update_cycle_id,
@@ -131,6 +142,7 @@ async def generate_objective_update_draft(
             program_name=program_name,
             context_pack=context_pack,
             user_instruction=user_instruction,
+            objective_count=objective_count,
         )
     except Exception:
         logger.exception(
@@ -191,6 +203,7 @@ async def generate_objective_update_draft(
         program_code=program_code,
         generation_status=generation_status,
         extra_warnings=generation_warnings,
+        objective_count=objective_count,
     )
 
     has_evidence = bool(context_pack.evidence_contexts)
@@ -201,15 +214,61 @@ async def generate_objective_update_draft(
         program_name=program_name,
         has_evidence_context=has_evidence,
         has_current_curriculum_context=has_current,
+        objective_count=objective_count,
     )
     all_warnings = adapted.warnings + quality_warnings
+
+    # R6.5C: Compute quality_level
+    quality_level = "good"
+    quality_messages: list[str] = []
+    if not has_evidence or not has_current:
+        quality_level = "warning"
+        quality_messages.append(
+            "Nguồn minh chứng chưa đủ mạnh, nội dung cần được rà soát thủ công."
+        )
+    if quality_warnings:
+        quality_level = "warning"
+        quality_messages.extend(quality_warnings)
+
+    # R6.5C-HARDEN-1: Check evidence_quality from skill payload
+    evidence_quality = payload.get("evidence_quality", "moderate")
+    if evidence_quality == "weak" and quality_level != "warning":
+        quality_level = "warning"
+    if evidence_quality == "weak":
+        _weak_msg = (
+            "Nguồn minh chứng chưa đủ mạnh, "
+            "nội dung cần được rà soát thủ công."
+        )
+        has_similar = any(
+            "minh chứng" in m and "rà soát" in m
+            for m in quality_messages
+        )
+        if not has_similar:
+            quality_messages.append(_weak_msg)
+
+    # R6.5C: Build specific_objective_texts from adapted specific_objectives
+    specific_objective_texts: list[str] = []
+    for so in (adapted.specific_objectives or []):
+        if isinstance(so, dict):
+            specific_objective_texts.append(
+                f"{so.get('code', '')}. {so.get('text', '')}"
+            )
+        elif isinstance(so, str):
+            specific_objective_texts.append(so)
 
     # Build _flat block for DB persistence (no debug, no used_chunks)
     flat_block: dict[str, Any] = {
         "general_objective": adapted.general_objective,
+        "general_objective_text": adapted.general_objective,
         "specific_objectives": adapted.specific_objectives,
+        "specific_objective_texts": specific_objective_texts,
+        "objective_count": objective_count,
+        "format_profile": adapted.source_summary.get("format_profile", ""),
         "source_summary": adapted.source_summary,
         "warnings": all_warnings,
+        "quality_level": quality_level,
+        "quality_messages": quality_messages,
+        "evidence_quality": evidence_quality,
     }
 
     # ── Step 5: Optional draft save ──────────────────────────────
@@ -233,6 +292,8 @@ async def generate_objective_update_draft(
                     "_meta": {
                         "generation_status": generation_status,
                         "warnings": generation_warnings,
+                        "objective_count": objective_count,
+                        "format_profile": adapted.source_summary.get("format_profile", ""),
                     },
                     "_flat": flat_block,
                 },
@@ -308,4 +369,11 @@ async def generate_objective_update_draft(
         specific_objectives=adapted.specific_objectives,
         source_summary_flat=adapted.source_summary,
         debug=debug_info,
+        # R6.5C fields
+        objective_count=objective_count,
+        format_profile=adapted.source_summary.get("format_profile", ""),
+        general_objective_text=adapted.general_objective,
+        specific_objective_texts=specific_objective_texts,
+        quality_level=quality_level,
+        quality_messages=quality_messages,
     )

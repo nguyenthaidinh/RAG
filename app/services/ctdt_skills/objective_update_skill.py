@@ -44,7 +44,7 @@ class ObjectiveUpdateStatus:
 
 @dataclass
 class ObjectiveUpdatePayload:
-    """Full payload matching the R6.1B + R6.5 output JSON schema."""
+    """Full payload matching the R6.1B + R6.5 + R6.5C output JSON schema."""
     objective_update_strategy: dict[str, Any] = field(default_factory=dict)
     current_objective_analysis: list[dict[str, Any]] = field(default_factory=list)
     proposed_objectives: list[dict[str, Any]] = field(default_factory=list)
@@ -56,6 +56,12 @@ class ObjectiveUpdatePayload:
     # R6.5: Direct flat output for Laravel binding
     general_objective_text: str = ""
     specific_objective_texts: list[str] = field(default_factory=list)
+    # R6.5C: Structured objectives with M-codes and group allocation
+    general_objective: str = ""
+    specific_objectives_structured: list[dict[str, Any]] = field(default_factory=list)
+    objective_count: int = 6
+    format_profile: str = ""
+    evidence_quality: str = "moderate"
 
 
 @dataclass
@@ -208,6 +214,88 @@ Chỉ trả JSON, không giải thích thêm.\
 """
 
 
+# ── R6.5C: Objective count allocation ────────────────────────────────
+
+_ALLOCATION_TABLE: dict[int, dict[str, list[str]]] = {
+    4: {"knowledge": ["M1", "M2"], "skills_attitude": ["M3"], "foreign_language_it": ["M4"]},
+    5: {"knowledge": ["M1", "M2", "M3"], "skills_attitude": ["M4"], "foreign_language_it": ["M5"]},
+    6: {"knowledge": ["M1", "M2", "M3"], "skills_attitude": ["M4", "M5"], "foreign_language_it": ["M6"]},
+    7: {"knowledge": ["M1", "M2", "M3"], "skills_attitude": ["M4", "M5", "M6"], "foreign_language_it": ["M7"]},
+    8: {"knowledge": ["M1", "M2", "M3", "M4"], "skills_attitude": ["M5", "M6", "M7"], "foreign_language_it": ["M8"]},
+}
+
+
+def compute_objective_allocation(objective_count: int) -> dict[str, list[str]]:
+    """Return M-code allocation per group for given objective_count (4-8)."""
+    clamped = max(4, min(8, objective_count))
+    return _ALLOCATION_TABLE[clamped]
+
+
+def _build_structured_system_prompt(objective_count: int) -> str:
+    """Build system prompt for R6.5C structured objective generation."""
+    alloc = compute_objective_allocation(objective_count)
+
+    alloc_desc_lines = []
+    for group, codes in alloc.items():
+        alloc_desc_lines.append(f"  - Nhóm {group}: {', '.join(codes)}")
+    alloc_block = "\n".join(alloc_desc_lines)
+
+    return f"""\
+Bạn là trợ lý hỗ trợ cập nhật chương trình đào tạo đại học Việt Nam.
+
+NHIỆM VỤ: Sinh phần "Mục tiêu đào tạo" theo văn phong CTĐT chính thức, \
+bám tài liệu nguồn/RAG context đã cung cấp.
+
+QUY TẮC BẮT BUỘC:
+1. Sinh đúng {objective_count} mục tiêu cụ thể, mã từ M1 đến M{objective_count}.
+2. Không sinh thiếu, không sinh dư, không nhảy số, không trùng mã.
+3. Chia nhóm theo phân bổ sau:
+{alloc_block}
+4. Mục tiêu cuối cùng LUÔN thuộc nhóm foreign_language_it.
+5. Không tự bịa thông tin nếu context không có.
+6. Nếu thiếu minh chứng, vẫn sinh bản nháp dựa trên thông tin chắc chắn \
+(tên ngành, chuẩn đầu ra, khối kiến thức, học phần) nhưng thêm warning.
+
+NỘI DUNG TỪNG NHÓM:
+- Nhóm knowledge (Về kiến thức): kiến thức chung, kiến thức cơ sở ngành, \
+kiến thức chuyên ngành. Bám vào ngành/chương trình từ context.
+- Nhóm skills_attitude (Về kỹ năng, thái độ): kỹ năng cá nhân, tự học, \
+kỹ năng nghề nghiệp, giao tiếp, làm việc nhóm, tổ chức công việc, \
+tư duy tích cực, sáng tạo, thích nghi, đạo đức nghề nghiệp, \
+trách nhiệm xã hội, phát triển bền vững.
+- Nhóm foreign_language_it (Trình độ Ngoại ngữ, Tin học): tiếng Anh, \
+ngoại ngữ, tin học, năng lực số, công cụ số, phục vụ học tập, \
+nghiên cứu khoa học, làm việc trong môi trường chuyên môn. \
+Nếu ngành CNTT, tránh viết "tin học cơ bản" quá sơ cấp — \
+viết theo hướng năng lực ngoại ngữ, công cụ số, năng lực số.
+
+MỤC TIÊU CHUNG (general_objective):
+- Một đoạn văn hoàn chỉnh, 120-180 từ.
+- Bắt đầu: "Mục tiêu của chương trình là đào tạo ..."
+- Có tên ngành/chương trình nếu context có.
+- Đề cập: kiến thức chung, kiến thức cơ sở, kiến thức chuyên ngành, \
+kỹ năng thực hành, làm việc độc lập, sáng tạo, phân tích, giải quyết vấn đề, \
+đạo đức, trách nhiệm, sức khỏe, năng lực học tập và nghiên cứu suốt đời.
+- Không viết kiểu marketing. Không quá chung chung.
+- Viết tiếng Việt học thuật, trang trọng.
+
+OUTPUT FORMAT (chỉ JSON, không markdown, không giải thích):
+{{
+  "general_objective": "Mục tiêu của chương trình là đào tạo ...",
+  "specific_objectives": [
+    {{"code": "M1", "group": "knowledge", "text": "..."}},
+    {{"code": "M2", "group": "knowledge", "text": "..."}},
+    ...
+    {{"code": "M{objective_count}", "group": "foreign_language_it", "text": "..."}}
+  ],
+  "evidence_quality": "strong|moderate|weak",
+  "warnings": []
+}}
+
+Chỉ trả JSON, không giải thích thêm.\
+"""
+
+
 # R6.5: Variable context char limits per role group
 _CONTEXT_CHAR_LIMITS: dict[str, int] = {
     "current_objective": 2500,
@@ -228,6 +316,7 @@ def _build_user_prompt(
     update_cycle_id: str,
     context_pack,
     user_instruction: str | None = None,
+    objective_count: int | None = None,
 ) -> tuple[str, dict[str, list]]:
     """Build user prompt from context pack. Returns (prompt, source_map)."""
     header = f"Đợt cập nhật CTĐT: {update_cycle_id}"
@@ -355,6 +444,7 @@ class ObjectiveUpdateSkill:
         program_name: str | None = None,
         context_pack,
         user_instruction: str | None = None,
+        objective_count: int = 6,
     ) -> ObjectiveUpdateResult:
         """Run objective update skill on the provided context pack."""
         # ── Count total contexts ─────────────────────────────────
@@ -418,18 +508,25 @@ class ObjectiveUpdateSkill:
             )
 
         # ── Build prompt ─────────────────────────────────────────
+        # R6.5C: clamp objective_count
+        objective_count = max(4, min(8, objective_count))
+
         user_prompt, source_map = _build_user_prompt(
             program_name=program_name,
             program_code=program_code,
             update_cycle_id=update_cycle_id,
             context_pack=context_pack,
             user_instruction=user_instruction,
+            objective_count=objective_count,
         )
+
+        # R6.5C: Use structured prompt for dynamic M-code generation
+        system_prompt = _build_structured_system_prompt(objective_count)
 
         # ── Call LLM ─────────────────────────────────────────────
         try:
             raw_json = await self._call_openai(
-                system_prompt=_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 api_key=api_key,
             )
@@ -451,7 +548,10 @@ class ObjectiveUpdateSkill:
 
         # ── Parse response ───────────────────────────────────────
         try:
-            result = self._parse_response(raw_json, source_map, context_pack)
+            result = self._parse_response(
+                raw_json, source_map, context_pack,
+                objective_count=objective_count,
+            )
         except Exception as exc:
             logger.warning(
                 "objective_update_skill.parse_failed update_cycle=%s error=%s",
@@ -516,6 +616,7 @@ class ObjectiveUpdateSkill:
 
     def _parse_response(
         self, raw_json: str, source_map: dict[str, list], context_pack,
+        *, objective_count: int = 6,
     ) -> ObjectiveUpdateResult:
         data = json.loads(raw_json)
         if not isinstance(data, dict):
@@ -696,6 +797,76 @@ class ObjectiveUpdateSkill:
                 if isinstance(s, str) and s.strip()
             ]
 
+        # R6.5C: Parse structured objectives from new prompt format
+        general_objective = _safe_str(data.get("general_objective"))
+        structured_objectives: list[dict[str, Any]] = []
+        structured_texts: list[str] = []
+
+        raw_specific = data.get("specific_objectives")
+        if isinstance(raw_specific, list):
+            for item in raw_specific:
+                if not isinstance(item, dict):
+                    continue
+                code = _safe_str(item.get("code"))
+                group = _safe_str(item.get("group"))
+                text = _safe_str(item.get("text"))
+                if code and text:
+                    structured_objectives.append({
+                        "code": code,
+                        "group": group,
+                        "text": text,
+                    })
+                    structured_texts.append(f"{code}. {text}")
+
+        # R6.5C: Validate M-code sequence
+        expected_alloc = compute_objective_allocation(objective_count)
+        expected_codes = []
+        for codes in expected_alloc.values():
+            expected_codes.extend(codes)
+
+        actual_codes = [o["code"] for o in structured_objectives]
+        if actual_codes and actual_codes != expected_codes:
+            warnings.append(
+                f"M-code sequence mismatch: expected {expected_codes}, "
+                f"got {actual_codes}. Kết quả có thể cần rà soát."
+            )
+
+        # R6.5C: Use structured data to also populate legacy fields
+        if general_objective and not general_text:
+            general_text = general_objective
+        if structured_texts and not specific_texts:
+            specific_texts = structured_texts
+        if general_text and not general_objective:
+            general_objective = general_text
+
+        # R6.5C: Evidence quality from LLM
+        evidence_quality = _safe_str(data.get("evidence_quality"), "moderate")
+        llm_warnings = data.get("warnings")
+        if isinstance(llm_warnings, list):
+            for w in llm_warnings:
+                if isinstance(w, str) and w.strip():
+                    warnings.append(w.strip())
+
+        # R6.5C-HARDEN-1: Default warning for weak evidence
+        _WEAK_EVIDENCE_DEFAULT = (
+            "Nguồn minh chứng chưa đủ mạnh, "
+            "nội dung cần được rà soát thủ công."
+        )
+        if evidence_quality == "weak":
+            # Only add if no similar warning exists
+            has_similar = any(
+                "minh chứng" in w and "rà soát" in w
+                for w in warnings
+            )
+            if not has_similar:
+                warnings.append(_WEAK_EVIDENCE_DEFAULT)
+
+        format_profile = (
+            "tay_nguyen_ctdt_dynamic_m_objectives"
+            if structured_objectives
+            else ""
+        )
+
         payload = ObjectiveUpdatePayload(
             objective_update_strategy=strategy,
             current_objective_analysis=current_analysis,
@@ -707,12 +878,26 @@ class ObjectiveUpdateSkill:
             next_actions=next_actions,
             general_objective_text=general_text,
             specific_objective_texts=specific_texts,
+            # R6.5C new fields
+            general_objective=general_objective,
+            specific_objectives_structured=structured_objectives,
+            objective_count=objective_count,
+            format_profile=format_profile,
+            evidence_quality=evidence_quality,
         )
 
-
+        # R6.5C: Fixed status determination — check ALL content sources
+        has_content = (
+            proposed
+            or current_analysis
+            or general_text
+            or general_objective
+            or specific_texts
+            or structured_objectives
+        )
         status = (
             ObjectiveUpdateStatus.GENERATED
-            if proposed or current_analysis
+            if has_content
             else ObjectiveUpdateStatus.INSUFFICIENT_CONTEXT
         )
 

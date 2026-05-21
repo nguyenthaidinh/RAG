@@ -175,14 +175,14 @@ class TestCheckObjectiveQuality:
         warnings = check_objective_quality(
             general_objective="Đào tạo kỹ sư CNTT", specific_objectives=["a", "b"],
         )
-        assert any("khuyến nghị 4-6" in w for w in warnings)
+        assert any("mục tiêu cụ thể" in w for w in warnings)
 
     def test_too_many_specifics_warns(self):
         warnings = check_objective_quality(
             general_objective="Đào tạo kỹ sư CNTT",
             specific_objectives=[f"Mục tiêu {i}" for i in range(8)],
         )
-        assert any("tối đa 6" in w for w in warnings)
+        assert any("mục tiêu cụ thể" in w for w in warnings)
 
     def test_generic_content_warns(self):
         warnings = check_objective_quality(
