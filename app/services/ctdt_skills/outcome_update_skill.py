@@ -128,6 +128,105 @@ def _norm_quality_flags(raw_flags: list, warnings: list[str]) -> list[str]:
     return result
 
 
+# ── Outcome count & allocation helpers ───────────────────────────────
+
+_GROUP_ORDER = ("knowledge", "skills", "autonomy_responsibility")
+_VALID_GROUPS = frozenset(_GROUP_ORDER)
+
+# Fixed allocation table — must match Laravel CycleOutcomeDraftService::ALLOCATIONS
+_OUTCOME_ALLOCATION_TABLE: dict[int, dict[str, int]] = {
+    6:  {"knowledge": 2, "skills": 3, "autonomy_responsibility": 1},
+    7:  {"knowledge": 3, "skills": 3, "autonomy_responsibility": 1},
+    8:  {"knowledge": 3, "skills": 4, "autonomy_responsibility": 1},
+    9:  {"knowledge": 3, "skills": 4, "autonomy_responsibility": 2},
+    10: {"knowledge": 4, "skills": 4, "autonomy_responsibility": 2},
+    11: {"knowledge": 4, "skills": 5, "autonomy_responsibility": 2},
+    12: {"knowledge": 4, "skills": 6, "autonomy_responsibility": 2},
+    13: {"knowledge": 5, "skills": 6, "autonomy_responsibility": 2},
+    14: {"knowledge": 5, "skills": 7, "autonomy_responsibility": 2},
+    15: {"knowledge": 6, "skills": 7, "autonomy_responsibility": 2},
+}
+
+
+def _compute_default_allocation(outcome_count: int) -> dict[str, int]:
+    """Return fixed allocation from table. Defensive clamp to 6..15."""
+    clamped = max(6, min(15, outcome_count))
+    return dict(_OUTCOME_ALLOCATION_TABLE[clamped])
+
+
+def _is_empty_outcome(po: dict) -> bool:
+    """Check if an outcome item has no real content."""
+    content = (po.get("proposed_content") or "").strip()
+    return not content or content.startswith("[")
+
+
+def _postprocess_outcomes(
+    proposed: list[dict],
+    outcome_count: int,
+    group_allocation: dict[str, int],
+    warnings: list[str],
+) -> list[dict]:
+    """Post-process: filter empties, assign C-codes by position, normalize groups.
+
+    FIX 2: No placeholder padding — only real AI content is kept.
+    FIX 3: Normalize group by position order, preserving all real content.
+    """
+    # Filter out empty/invalid items
+    valid = [po for po in proposed if not _is_empty_outcome(po)]
+    if len(valid) < len(proposed):
+        dropped = len(proposed) - len(valid)
+        warnings.append(f"Loại bỏ {dropped} CĐR rỗng/không hợp lệ từ AI output.")
+
+    # Truncate if LLM produced more than requested
+    if len(valid) > outcome_count:
+        warnings.append(
+            f"AI sinh {len(valid)} CĐR, chỉ giữ {outcome_count} item đầu tiên."
+        )
+        valid = valid[:outcome_count]
+
+    # Build position→group mapping from allocation
+    position_groups: list[str] = []
+    for group in _GROUP_ORDER:
+        count = group_allocation.get(group, 0)
+        position_groups.extend([group] * count)
+
+    # Assign C-codes and groups by position
+    had_code_normalization = False
+    had_group_normalization = False
+    result: list[dict] = []
+    for idx, item in enumerate(valid):
+        expected_code = f"C{idx + 1}"
+        original_code = str(item.get("code") or "").strip()
+        if original_code != expected_code:
+            had_code_normalization = True
+        item["code"] = expected_code
+        # Preserve is_draft_code=False for revise/keep (official codes)
+        op = item.get("update_operation", "add")
+        if op in ("revise", "keep") and item.get("mapped_from_current"):
+            item.setdefault("is_draft_code", False)
+        else:
+            item["is_draft_code"] = True
+        # Assign group by position
+        if idx < len(position_groups):
+            expected_group = position_groups[idx]
+            if item.get("outcome_type") != expected_group:
+                had_group_normalization = True
+            item["outcome_type"] = expected_group
+        result.append(item)
+
+    if had_code_normalization:
+        warnings.append(
+            "Đã chuẩn hóa mã của một hoặc nhiều CĐR về dãy C1..Cn theo cấu trúc CTĐT bắt buộc."
+        )
+
+    if had_group_normalization:
+        warnings.append(
+            "Đã chuẩn hóa nhóm của một hoặc nhiều CĐR theo phân bổ CTĐT bắt buộc."
+        )
+
+    return result
+
+
 # ── Prompt ───────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
@@ -149,7 +248,8 @@ QUY TẮC BẮT BUỘC:
 2. KHÔNG bịa thông tin, số liệu, nhu cầu doanh nghiệp, nguồn không có.
 3. KHÔNG bịa quy định pháp lý, chuẩn nghề nghiệp, vị trí việc làm.
 4. KHÔNG sinh ma trận CĐR-học phần. Đó là bước khác.
-5. Nếu mã PLO1/CĐR1 do bạn tự đề xuất, set is_draft_code=true.
+5. Dùng mã CĐR theo format C1, C2, C3, ..., C{n} (n = số lượng yêu cầu). \
+Luôn set is_draft_code=true.
 6. Nếu CĐR quá chung giống mục tiêu, thêm quality_flags: \
 ["overlaps_with_objective","too_broad"].
 7. Nếu CĐR quá chi tiết giống nội dung học phần, thêm quality_flags: \
@@ -161,6 +261,10 @@ quality_flags: ["missing_objective_mapping"].
 10. Nếu thiếu dữ liệu, đưa vào missing_information, KHÔNG bịa.
 11. bloom_level phải là remember|understand|apply|analyze|evaluate|create|unknown.
 12. outcome_type phải là knowledge|skills|autonomy_responsibility|other.
+13. Sinh ĐÚNG số lượng CĐR theo yêu cầu trong phần PHÂN BỔ CĐR. KHÔNG thiếu, KHÔNG dư.
+14. Mã CĐR phải liên tục: C1, C2, ..., C{n}. KHÔNG nhảy mã, KHÔNG trùng mã.
+15. Phân bổ nhóm: knowledge trước (C1..), skills giữa, autonomy_responsibility cuối.
+16. Tuân thủ CHÍNH XÁC số lượng mỗi nhóm theo phân bổ trong user prompt.
 
 OUTPUT FORMAT (JSON):
 {
@@ -182,7 +286,7 @@ OUTPUT FORMAT (JSON):
   "proposed_outcomes": [
     {
       "outcome_type": "knowledge|skills|autonomy_responsibility|other",
-      "code": "PLO1 hoặc null",
+      "code": "C1",
       "is_draft_code": true,
       "update_operation": "keep|revise|replace|add|remove",
       "mapped_from_current": "CĐR hiện tại (nếu có)",
@@ -190,7 +294,7 @@ OUTPUT FORMAT (JSON):
       "rationale": "Lý do",
       "bloom_level": "remember|understand|apply|analyze|evaluate|create|unknown",
       "mapped_objectives": [
-        {"objective_code": "PO1", "objective_content": "...", "mapping_reason": "..."}
+        {"objective_code": "M1", "objective_content": "...", "mapping_reason": "..."}
       ],
       "alignment": {},
       "evidence_refs": [{"source_index": 0, "context_group": "direction"}],
@@ -201,9 +305,9 @@ OUTPUT FORMAT (JSON):
   ],
   "objective_outcome_alignment": [
     {
-      "objective_code": "PO1",
+      "objective_code": "M1",
       "objective_content": "...",
-      "mapped_outcomes": ["PLO1","PLO2"],
+      "mapped_outcomes": ["C1","C2"],
       "coverage_status": "covered|partially_covered|not_covered|unknown",
       "notes": "...",
       "evidence_refs": []
@@ -225,6 +329,16 @@ Chỉ trả JSON, không giải thích thêm.\
 """
 
 
+def _objective_prompt_heading(objective_source: str) -> str:
+    if objective_source == "laravel_approved_objectives":
+        return "=== MỤC TIÊU ĐÀO TẠO ĐÃ DUYỆT TỪ HỆ THỐNG CTĐT ==="
+    if objective_source == "legacy_laravel_approved_objectives":
+        return "=== MỤC TIÊU ĐÀO TẠO TỪ HỆ THỐNG CTĐT - ĐỊNH DẠNG LEGACY, CẦN RÀ SOÁT ==="
+    if objective_source == "rag_latest_objective_draft_fallback":
+        return "=== BẢN NHÁP AI MỤC TIÊU ĐÀO TẠO THAM KHẢO - CHƯA PHẢI NỘI DUNG ĐÃ DUYỆT ==="
+    return "=== MỤC TIÊU ĐÀO TẠO ==="
+
+
 def _build_user_prompt(
     *,
     program_name: str | None,
@@ -232,6 +346,8 @@ def _build_user_prompt(
     update_cycle_id: str,
     context_pack,
     user_instruction: str | None = None,
+    outcome_count: int = 10,
+    group_allocation: dict[str, int] | None = None,
 ) -> tuple[str, dict[str, list]]:
     """Build user prompt from context pack. Returns (prompt, source_map)."""
     header = f"Đợt cập nhật CTĐT: {update_cycle_id}"
@@ -239,24 +355,40 @@ def _build_user_prompt(
         header += f"\nChương trình: {program_name}"
     if program_code:
         header += f" (Mã ngành: {program_code})"
+    # R6.8A: allocation block
+    allocation = group_allocation or _compute_default_allocation(outcome_count)
+    header += f"\n\n=== PHÂN BỔ CĐR ==="
+    header += f"\nSố lượng CĐR cần sinh: {outcome_count}"
+    c = 1
+    for g in _GROUP_ORDER:
+        n = allocation.get(g, 0)
+        if n > 0:
+            header += f"\n  - {g}: {n} CĐR (C{c}..C{c + n - 1})"
+            c += n
+
     if user_instruction:
         header += f"\n\nHướng dẫn bổ sung: {user_instruction}"
 
     # Objective update payload
     obj_parts: list[str] = []
+    objective_source = getattr(context_pack, "objective_source", "none")
+    objective_heading = _objective_prompt_heading(objective_source)
     if context_pack.objective_update_payload:
+        general_obj = context_pack.objective_update_payload.get("_general_objective", "")
         proposed = context_pack.objective_update_payload.get("proposed_objectives", [])
         if proposed:
             obj_lines = []
+            if general_obj:
+                obj_lines.append(f"  Mục tiêu chung: {general_obj}")
             for po in proposed:
                 code = po.get("code", "")
                 content = po.get("proposed_content", "")
                 obj_lines.append(f"  - {code}: {content}")
             obj_parts.append(
-                "\n=== MỤC TIÊU ĐÀO TẠO ĐÃ ĐỀ XUẤT ===\n" + "\n".join(obj_lines)
+                f"\n{objective_heading}\n" + "\n".join(obj_lines)
             )
-    else:
-        obj_parts.append("\n=== MỤC TIÊU ĐÀO TẠO ĐÃ ĐỀ XUẤT ===\n(Chưa có)")
+    if not obj_parts:
+        obj_parts.append("\n=== MỤC TIÊU ĐÀO TẠO ===\n(Chưa có mục tiêu đã duyệt làm căn cứ)")
 
     source_map: dict[str, list] = {}
     all_parts: list[str] = list(obj_parts)
@@ -313,7 +445,9 @@ class OutcomeUpdateSkill:
 
     async def run(self, *, update_cycle_id: str, program_id: str | None = None,
                   program_code: str | None = None, program_name: str | None = None,
-                  context_pack, user_instruction: str | None = None) -> OutcomeUpdateResult:
+                  context_pack, user_instruction: str | None = None,
+                  outcome_count: int = 10,
+                  group_allocation: dict[str, int] | None = None) -> OutcomeUpdateResult:
         total = (
             len(context_pack.current_outcome_contexts)
             + len(context_pack.current_curriculum_contexts)
@@ -360,6 +494,7 @@ class OutcomeUpdateSkill:
             program_name=program_name, program_code=program_code,
             update_cycle_id=update_cycle_id, context_pack=context_pack,
             user_instruction=user_instruction,
+            outcome_count=outcome_count, group_allocation=group_allocation,
         )
 
         try:
@@ -381,6 +516,22 @@ class OutcomeUpdateSkill:
                 payload=OutcomeUpdatePayload(missing_information=list(context_pack.missing_information)),
                 warnings=[f"Lỗi parse LLM response: {str(exc)[:150]}"],
             )
+
+        # R6.8A-PATCH-1: post-process to enforce C-codes and allocation
+        if result.status == OutcomeUpdateStatus.GENERATED:
+            allocation = group_allocation or _compute_default_allocation(outcome_count)
+            if result.payload.proposed_outcomes:
+                result.payload.proposed_outcomes = _postprocess_outcomes(
+                    result.payload.proposed_outcomes, outcome_count, allocation, result.warnings,
+                )
+            actual = len(result.payload.proposed_outcomes)
+            # Quality gate: deficit → FAILED, truncated → keep GENERATED with warning
+            if actual < outcome_count:
+                result.status = OutcomeUpdateStatus.FAILED
+                result.warnings.append(
+                    f"AI chỉ sinh được {actual}/{outcome_count} chuẩn đầu ra hợp lệ. "
+                    "Vui lòng sinh lại hoặc bổ sung thủ công."
+                )
 
         logger.info("outcome_update_skill.done update_cycle=%s proposed=%d status=%s",
                      update_cycle_id, len(result.payload.proposed_outcomes), result.status)

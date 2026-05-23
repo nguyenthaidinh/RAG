@@ -247,6 +247,9 @@ class OutcomeUpdateContextPack:
     other_contexts: list[ContextItem] = field(default_factory=list)
     missing_information: list[dict[str, str]] = field(default_factory=list)
     source_summary: ContextPackSourceSummary | None = None
+    # R6.8A-PATCH-1 FIX 6: objective source determined at context level
+    objective_source: str = "none"
+    objective_warnings: list[str] = field(default_factory=list)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -276,6 +279,115 @@ _CONTEXT_KEY_MAP = {
     "comparison": "comparison_contexts",
     "course_syllabus": "course_syllabus_contexts",
 }
+
+
+def _has_valid_proposed_objectives(payload: dict[str, Any]) -> bool:
+    proposed = payload.get("proposed_objectives")
+    if not isinstance(proposed, list) or not proposed:
+        return False
+    return any(
+        isinstance(obj, dict)
+        and bool(str(obj.get("proposed_content") or "").strip())
+        for obj in proposed
+    )
+
+
+def _first_nonempty_string(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _adapt_latest_objective_draft_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """
+    Adapt R6.5C flat objective draft data for the outcome prompt only.
+    The stored draft is not mutated or written back.
+    """
+    if _has_valid_proposed_objectives(payload):
+        return payload, []
+
+    flat = payload.get("_flat")
+    if not isinstance(flat, dict):
+        flat = {}
+
+    specific_candidates = (
+        flat.get("specific_objectives"),
+        payload.get("specific_objectives"),
+        flat.get("specific_objective_texts"),
+        payload.get("specific_objective_texts"),
+    )
+    raw_specifics: list[Any] = []
+    for candidate in specific_candidates:
+        if isinstance(candidate, list) and candidate:
+            raw_specifics = candidate
+            break
+
+    if not raw_specifics:
+        return payload, []
+
+    proposed: list[dict[str, Any]] = []
+    assigned_codes = False
+    for item in raw_specifics:
+        if isinstance(item, dict):
+            content = _first_nonempty_string(
+                item.get("text"),
+                item.get("proposed_content"),
+                item.get("content"),
+                item.get("objective_content"),
+            )
+            if not content:
+                continue
+            code = str(item.get("code") or "").strip()
+            if not code:
+                code = f"M{len(proposed) + 1}"
+                assigned_codes = True
+            proposed.append({
+                "code": code,
+                "proposed_content": content,
+                "is_draft_code": item.get("is_draft_code", True),
+                "objective_type": item.get("objective_type") or item.get("group") or "specific_objective",
+            })
+        elif isinstance(item, str) and item.strip():
+            proposed.append({
+                "code": f"M{len(proposed) + 1}",
+                "proposed_content": item.strip(),
+                "is_draft_code": True,
+                "objective_type": "specific_objective",
+            })
+            assigned_codes = True
+
+    if not proposed:
+        return payload, []
+
+    adapted = dict(payload)
+    adapted["proposed_objectives"] = proposed
+    general_objective = _first_nonempty_string(
+        flat.get("general_objective_text"),
+        payload.get("general_objective_text"),
+        flat.get("general_objective"),
+        payload.get("general_objective"),
+    )
+    if general_objective:
+        adapted["_general_objective"] = general_objective
+
+    warnings = [
+        "Đã chuyển mục tiêu từ định dạng _flat/draft nội bộ sang proposed_objectives để sinh chuẩn đầu ra."
+    ]
+    if assigned_codes:
+        warnings.append(
+            "Draft mục tiêu nội bộ không có đủ mã M; hệ thống đã gán tạm mã M1..Mn theo thứ tự."
+        )
+
+    existing = adapted.get("_adapter_warnings")
+    if isinstance(existing, list):
+        adapted["_adapter_warnings"] = [*existing, *warnings]
+    else:
+        adapted["_adapter_warnings"] = warnings
+    return adapted, warnings
 
 
 # ── Latest objective_update draft reader ─────────────────────────────
@@ -333,6 +445,8 @@ async def build_outcome_update_context_pack(
     program_name: str | None = None,
     top_k_per_role: int = 5,
     query_svc: Any = None,
+    approved_objectives: list[dict] | None = None,
+    approved_objective_snapshot: dict[str, Any] | None = None,
 ) -> OutcomeUpdateContextPack:
     """
     Build a context pack for outcome (CĐR) update by:
@@ -353,44 +467,133 @@ async def build_outcome_update_context_pack(
     total_contexts = 0
     groups_retrieved: list[str] = []
 
-    # ── Step 1: Load latest objective_update draft ────────────────
-    obj_payload = await _load_latest_objective_draft(
-        db,
-        tenant_id=tenant_id,
-        update_cycle_id=update_cycle_id,
-        program_code=program_code,
-    )
+    # ── Step 1: Load objective source ───────────────────────────────
+    # R6.8A-PATCH-1 FIX 4+6: approved_objective_snapshot > legacy list > RAG draft
+    snapshot_used = False
+    if approved_objective_snapshot and isinstance(approved_objective_snapshot, dict):
+        # Validate snapshot
+        is_completed = approved_objective_snapshot.get("is_completed") is True
+        spec_objs = approved_objective_snapshot.get("specific_objectives", [])
+        has_valid_items = (
+            isinstance(spec_objs, list)
+            and len(spec_objs) > 0
+            and any(
+                isinstance(s, dict) and s.get("code", "").startswith("M") and (s.get("text") or "").strip()
+                for s in spec_objs
+            )
+        )
+        if is_completed and has_valid_items:
+            obj_payload = {
+                "proposed_objectives": [
+                    {
+                        "code": obj.get("code", ""),
+                        "proposed_content": obj.get("text", ""),
+                        "is_draft_code": False,
+                        "objective_type": obj.get("group", "specific_objective"),
+                    }
+                    for obj in spec_objs
+                    if isinstance(obj, dict) and (obj.get("text") or "").strip()
+                ],
+                "_general_objective": approved_objective_snapshot.get("general_objective", ""),
+            }
+            pack.objective_update_payload = obj_payload
+            pack.objective_source = "laravel_approved_objectives"
+            pack.role_coverage["objective_update"] = RoleCoverageItem(
+                document_roles=["laravel_approved"],
+                context_count=len(obj_payload["proposed_objectives"]),
+                documents_used=[], status="available",
+                scoped_document_count=0, retrieval_status="ok",
+            )
+            snapshot_used = True
+            logger.info(
+                "outcome_context.snapshot_objectives_loaded update_cycle=%s count=%d",
+                update_cycle_id, len(obj_payload["proposed_objectives"]),
+            )
+        else:
+            logger.warning(
+                "outcome_context.snapshot_invalid update_cycle=%s is_completed=%s items=%d",
+                update_cycle_id, is_completed, len(spec_objs) if isinstance(spec_objs, list) else 0,
+            )
+            pack.missing_information.append({
+                "type": "objective_snapshot_invalid",
+                "description": "Snapshot mục tiêu từ Laravel không hợp lệ hoặc chưa hoàn thành.",
+            })
 
-    if obj_payload is not None:
+    if not snapshot_used and approved_objectives:
+        # Legacy list format
+        obj_payload = {
+            "proposed_objectives": [
+                {
+                    "code": obj.get("code", obj.get("code", "")),
+                    "proposed_content": obj.get("content", obj.get("proposed_content", obj.get("text", ""))),
+                    "is_draft_code": False,
+                    "objective_type": obj.get("objective_type", "specific_objective"),
+                }
+                for obj in approved_objectives
+            ],
+        }
         pack.objective_update_payload = obj_payload
+        pack.objective_source = "legacy_laravel_approved_objectives"
         pack.role_coverage["objective_update"] = RoleCoverageItem(
-            document_roles=["objective_update_draft"],
-            context_count=1,
-            documents_used=[],
-            status="available",
-            scoped_document_count=0,
-            retrieval_status="ok",
+            document_roles=["laravel_approved"],
+            context_count=len(approved_objectives),
+            documents_used=[], status="available",
+            scoped_document_count=0, retrieval_status="ok",
         )
+        snapshot_used = True
         logger.info(
-            "outcome_context.objective_draft_loaded update_cycle=%s",
-            update_cycle_id,
+            "outcome_context.legacy_objectives_loaded update_cycle=%s count=%d",
+            update_cycle_id, len(approved_objectives),
         )
-    else:
-        pack.role_coverage["objective_update"] = RoleCoverageItem(
-            document_roles=["objective_update_draft"],
-            context_count=0,
-            documents_used=[],
-            status="missing",
-            scoped_document_count=0,
-            retrieval_status="ok",
+
+    if not snapshot_used:
+        # Fallback: load from RAG internal draft
+        obj_payload = await _load_latest_objective_draft(
+            db,
+            tenant_id=tenant_id,
+            update_cycle_id=update_cycle_id,
+            program_code=program_code,
         )
-        pack.missing_information.append({
-            "type": "objective_update",
-            "description": (
-                "Chưa có bản nháp mục tiêu đào tạo để làm căn cứ "
-                "sinh chuẩn đầu ra."
-            ),
-        })
+
+        if obj_payload is not None:
+            obj_payload, adapter_warnings = _adapt_latest_objective_draft_payload(obj_payload)
+            pack.objective_update_payload = obj_payload
+            pack.objective_warnings.extend(adapter_warnings)
+            for warning in adapter_warnings:
+                pack.missing_information.append({
+                    "type": "objective_draft_flat_adapter",
+                    "description": warning,
+                })
+            pack.objective_source = "rag_latest_objective_draft_fallback"
+            pack.role_coverage["objective_update"] = RoleCoverageItem(
+                document_roles=["objective_update_draft"],
+                context_count=1,
+                documents_used=[],
+                status="available",
+                scoped_document_count=0,
+                retrieval_status="ok",
+            )
+            logger.info(
+                "outcome_context.objective_draft_loaded update_cycle=%s",
+                update_cycle_id,
+            )
+        else:
+            pack.objective_source = "none"
+            pack.role_coverage["objective_update"] = RoleCoverageItem(
+                document_roles=["objective_update_draft"],
+                context_count=0,
+                documents_used=[],
+                status="missing",
+                scoped_document_count=0,
+                retrieval_status="ok",
+            )
+            pack.missing_information.append({
+                "type": "objective_update",
+                "description": (
+                    "Chưa có bản nháp mục tiêu đào tạo để làm căn cứ "
+                    "sinh chuẩn đầu ra."
+                ),
+            })
 
     groups_retrieved.append("objective_update")
 

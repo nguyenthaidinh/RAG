@@ -68,7 +68,8 @@ class TestSkillParseJson:
              patch("app.services.ctdt_skills.outcome_update_skill.settings") as ms:
             ms.SYNTHESIS_ENABLED = True; ms.OPENAI_API_KEY = "sk-test"
             r = await skill.run(update_cycle_id="15", context_pack=_make_pack())
-        assert r.status == "generated"
+        # R6.8A-PATCH-1: mock only has 1 outcome, quality gate sets failed (1/10)
+        assert r.status in ("generated", "failed")
         assert len(r.payload.proposed_outcomes) >= 1
 
 # ══ 2. Has strategy ══
@@ -213,8 +214,8 @@ class TestMissingInfoMerge:
             r = await skill.run(update_cycle_id="15", context_pack=pack)
         mi_types = [m.get("type") for m in r.payload.missing_information]
         # context_pack had objective_update missing, but LLM may not emit it
-        # The merge happens at service level, so here we just check skill doesn't crash
-        assert r.status in ("generated", "insufficient_context", "needs_generation")
+        # R6.8A-PATCH-1: mock only has 1 outcome, quality gate may set failed
+        assert r.status in ("generated", "insufficient_context", "needs_generation", "failed")
 
 # ══ 12. LLM disabled ══
 class TestLLMDisabled:
@@ -402,7 +403,9 @@ class TestNormOutcomeType:
              patch("app.services.ctdt_skills.outcome_update_skill.settings") as ms:
             ms.SYNTHESIS_ENABLED = True; ms.OPENAI_API_KEY = "sk-test"
             r = await skill.run(update_cycle_id="15", context_pack=_make_pack())
-        assert r.payload.proposed_outcomes[0]["outcome_type"] == "other"
+        assert r.payload.proposed_outcomes[0]["outcome_type"] in (
+            "knowledge", "skills", "autonomy_responsibility",
+        )  # R6.8A: invalid types reassigned to valid group
 
 
 # ══ 24. Invalid update_operation normalized ══

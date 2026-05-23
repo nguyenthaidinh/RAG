@@ -2339,6 +2339,31 @@ class OutcomeDraftRequest(BaseModel):
     save_draft: bool = False
     top_k_per_role: int = Field(default=5, ge=1, le=20)
     user_instruction: str | None = Field(default=None, max_length=2000)
+    # R6.8A: outcome count & allocation
+    outcome_count: int = Field(
+        default=10, ge=6, le=15,
+        description="Số lượng CĐR cần sinh (6-15, mặc định 10).",
+    )
+    group_allocation: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "Phân bổ CĐR theo nhóm. Phải khớp bảng cố định CTĐT. "
+            "Nếu None → dùng bảng mặc định."
+        ),
+    )
+    # R6.8A-PATCH-1 FIX 4: approved objective snapshot
+    approved_objective_snapshot: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Snapshot mục tiêu đào tạo đã lưu/hoàn thành từ Laravel. "
+            "Phải có is_completed=true, general_objective, specific_objectives."
+        ),
+    )
+    # Legacy: approved objectives list (backward compat)
+    approved_objectives: list[dict] | None = Field(
+        default=None,
+        description="Legacy: danh sách mục tiêu đã duyệt. Ưu tiên snapshot nếu có.",
+    )
 
 
 class OutcomeDraftSourceSummaryResponse(BaseModel):
@@ -2360,6 +2385,16 @@ class OutcomeDraftResponse(BaseModel):
     source_summary: OutcomeDraftSourceSummaryResponse
     generation_status: str = "needs_generation"
     warnings: list[str] = Field(default_factory=list)
+    # R6.8A-PATCH-1: quality gate + structured flat output
+    outcome_count: int = 10
+    group_allocation: dict[str, int] = Field(default_factory=dict)
+    outcomes_flat: list[dict[str, Any]] = Field(default_factory=list)
+    outcomes_structured: list[dict[str, Any]] = Field(default_factory=list)
+    outcome_texts: list[str] = Field(default_factory=list)
+    objective_source: str = "none"
+    format_profile: str = "tay_nguyen_mau_07"
+    quality_level: str = "good"
+    quality_messages: list[str] = Field(default_factory=list)
 
 
 @router.post(
@@ -2374,12 +2409,54 @@ async def generate_outcomes_draft(
     query_svc=Depends(_get_query_svc),
 ):
     """
-    R6.2B — Sinh bản nháp cập nhật chuẩn đầu ra.
+    R6.2B + R6.8A-PATCH-1 — Sinh bản nháp cập nhật chuẩn đầu ra.
 
     Dùng OutcomeUpdateContextPack (R6.2A) + LLM để đề xuất CĐR mới.
+    Hỗ trợ outcome_count, approved_objective_snapshot, quality gate.
     Không ghi dữ liệu chính thức.
     """
     from app.services.ctdt_outcome_update_service import generate_outcome_update_draft
+    from app.services.ctdt_skills.outcome_update_skill import (
+        _compute_default_allocation, _VALID_GROUPS, _OUTCOME_ALLOCATION_TABLE,
+    )
+
+    # R6.8A-PATCH-1 FIX 9: strict group_allocation validation
+    if body.group_allocation is not None:
+        invalid_keys = set(body.group_allocation.keys()) - _VALID_GROUPS
+        missing_keys = _VALID_GROUPS - set(body.group_allocation.keys())
+        if invalid_keys or missing_keys:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_group_allocation_keys",
+                    "message": (
+                        f"group_allocation phải có đúng 3 keys: {sorted(_VALID_GROUPS)}."
+                    ),
+                    "retryable": False,
+                },
+            )
+        if any(v < 0 for v in body.group_allocation.values()):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "group_allocation_negative_value",
+                    "message": "Giá trị trong group_allocation không được âm.",
+                    "retryable": False,
+                },
+            )
+        expected = _OUTCOME_ALLOCATION_TABLE.get(body.outcome_count)
+        if expected and body.group_allocation != expected:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "group_allocation_contract_mismatch",
+                    "message": (
+                        "Phân bổ chuẩn đầu ra không khớp cấu trúc CTĐT bắt buộc "
+                        f"cho số lượng đã chọn. Kỳ vọng: {expected}"
+                    ),
+                    "retryable": False,
+                },
+            )
 
     try:
         result = await generate_outcome_update_draft(
@@ -2394,6 +2471,10 @@ async def generate_outcomes_draft(
             user_instruction=body.user_instruction,
             save_draft=body.save_draft,
             query_svc=query_svc,
+            outcome_count=body.outcome_count,
+            group_allocation=body.group_allocation,
+            approved_objectives=body.approved_objectives,
+            approved_objective_snapshot=body.approved_objective_snapshot,
         )
     except Exception as exc:
         logger.error(
@@ -2427,6 +2508,14 @@ async def generate_outcomes_draft(
         ),
         generation_status=result.generation_status,
         warnings=result.warnings or [],
+        outcome_count=result.outcome_count,
+        group_allocation=result.group_allocation or {},
+        outcomes_flat=result.outcomes_flat or [],
+        outcomes_structured=result.outcomes_structured or [],
+        outcome_texts=result.outcome_texts or [],
+        objective_source=result.objective_source,
+        quality_level=result.quality_level,
+        quality_messages=result.quality_messages or [],
     )
 
 
