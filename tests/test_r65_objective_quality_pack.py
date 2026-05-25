@@ -171,18 +171,19 @@ class TestCheckObjectiveQuality:
         )
         assert any("chưa được sinh" in w for w in warnings)
 
-    def test_few_specifics_warns(self):
+    def test_count_mismatch_is_not_soft_quality_warning(self):
         warnings = check_objective_quality(
-            general_objective="Đào tạo kỹ sư CNTT", specific_objectives=["a", "b"],
+            general_objective="Đào tạo kỹ sư CNTT",
+            specific_objectives=["a", "b"],
         )
-        assert any("mục tiêu cụ thể" in w for w in warnings)
+        assert not any("2/6" in w for w in warnings)
 
-    def test_too_many_specifics_warns(self):
+    def test_too_many_specifics_is_not_soft_quality_warning(self):
         warnings = check_objective_quality(
             general_objective="Đào tạo kỹ sư CNTT",
             specific_objectives=[f"Mục tiêu {i}" for i in range(8)],
         )
-        assert any("mục tiêu cụ thể" in w for w in warnings)
+        assert not any("8" in w and "6" in w for w in warnings)
 
     def test_generic_content_warns(self):
         warnings = check_objective_quality(
@@ -842,4 +843,3 @@ class TestLatestEndpointNoDebugParam:
 
         assert "debug" in response.data
         assert response.data["debug"] is None
-

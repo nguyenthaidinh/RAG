@@ -803,6 +803,7 @@ class ObjectiveUpdateSkill:
         structured_texts: list[str] = []
 
         raw_specific = data.get("specific_objectives")
+        has_structured_contract_response = isinstance(raw_specific, list)
         if isinstance(raw_specific, list):
             for item in raw_specific:
                 if not isinstance(item, dict):
@@ -810,26 +811,73 @@ class ObjectiveUpdateSkill:
                 code = _safe_str(item.get("code"))
                 group = _safe_str(item.get("group"))
                 text = _safe_str(item.get("text"))
-                if code and text:
+                if code or group or text:
                     structured_objectives.append({
                         "code": code,
                         "group": group,
                         "text": text,
                     })
-                    structured_texts.append(f"{code}. {text}")
+                    if code and text:
+                        structured_texts.append(f"{code}. {text}")
 
-        # R6.5C: Validate M-code sequence
+        # R6.9A: Strict M-code count and group contract.
         expected_alloc = compute_objective_allocation(objective_count)
-        expected_codes = []
-        for codes in expected_alloc.values():
-            expected_codes.extend(codes)
-
+        expected_codes = [f"M{i}" for i in range(1, objective_count + 1)]
+        expected_group_by_code = {
+            code: group
+            for group, codes in expected_alloc.items()
+            for code in codes
+        }
         actual_codes = [o["code"] for o in structured_objectives]
-        if actual_codes and actual_codes != expected_codes:
-            warnings.append(
-                f"M-code sequence mismatch: expected {expected_codes}, "
-                f"got {actual_codes}. Kết quả có thể cần rà soát."
+        contract_warnings: list[str] = []
+
+        if not has_structured_contract_response:
+            contract_warnings.append(
+                f"AI không trả về cấu trúc mục tiêu bắt buộc M1 đến M{objective_count}."
             )
+        else:
+            actual_objective_count = len(structured_objectives)
+            if actual_objective_count < objective_count:
+                contract_warnings.append(
+                    f"AI chỉ sinh được {actual_objective_count}/{objective_count} "
+                    "mục tiêu cụ thể hợp lệ."
+                )
+            elif actual_objective_count > objective_count:
+                contract_warnings.append(
+                    f"AI sinh {actual_objective_count}/{objective_count} mục tiêu cụ thể, "
+                    "vượt số lượng được yêu cầu."
+                )
+
+            if actual_codes != expected_codes:
+                contract_warnings.append(
+                    f"Mã mục tiêu không đúng yêu cầu. Kỳ vọng M1 đến M{objective_count}."
+                )
+
+            duplicate_codes = sorted({
+                code for code in actual_codes
+                if code and actual_codes.count(code) > 1
+            })
+            if duplicate_codes:
+                contract_warnings.append(
+                    "Mã mục tiêu bị trùng: " + ", ".join(duplicate_codes) + "."
+                )
+
+            for obj in structured_objectives:
+                code = obj.get("code", "")
+                expected_group = expected_group_by_code.get(code)
+                if expected_group and obj.get("group") != expected_group:
+                    contract_warnings.append(
+                        f"{code} phải thuộc nhóm {expected_group} "
+                        f"nhưng AI trả về {obj.get('group') or 'rỗng'}."
+                    )
+                if not str(obj.get("text") or "").strip():
+                    contract_warnings.append(
+                        f"{code or 'Một mục tiêu'} có nội dung rỗng."
+                    )
+
+        for warning in contract_warnings:
+            if warning not in warnings:
+                warnings.append(warning)
 
         # R6.5C: Use structured data to also populate legacy fields
         if general_objective and not general_text:
@@ -895,11 +943,14 @@ class ObjectiveUpdateSkill:
             or specific_texts
             or structured_objectives
         )
-        status = (
-            ObjectiveUpdateStatus.GENERATED
-            if has_content
-            else ObjectiveUpdateStatus.INSUFFICIENT_CONTEXT
-        )
+        if contract_warnings:
+            status = ObjectiveUpdateStatus.FAILED
+        else:
+            status = (
+                ObjectiveUpdateStatus.GENERATED
+                if has_content
+                else ObjectiveUpdateStatus.INSUFFICIENT_CONTEXT
+            )
 
         return ObjectiveUpdateResult(
             status=status, payload=payload, warnings=warnings,

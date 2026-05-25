@@ -125,6 +125,113 @@ def _make_structured_llm_response(objective_count: int = 6) -> str:
 # ══════════════════════════════════════════════════════════════════════
 
 
+def _make_structured_objectives(objective_count: int = 6) -> list[dict]:
+    alloc = compute_objective_allocation(objective_count)
+    objectives = []
+    for group, codes in alloc.items():
+        for code in codes:
+            objectives.append({
+                "code": code,
+                "group": group,
+                "text": f"Mục tiêu {code} thuộc nhóm {group}.",
+            })
+    return objectives
+
+
+def _make_structured_llm_response_from_objectives(
+    objectives: list[dict],
+    *,
+    evidence_quality: str = "moderate",
+) -> str:
+    return json.dumps({
+        "general_objective": (
+            "Mục tiêu của chương trình là đào tạo kỹ sư Công nghệ thông tin."
+        ),
+        "specific_objectives": objectives,
+        "evidence_quality": evidence_quality,
+        "warnings": [],
+    })
+
+
+async def _run_skill_with_objectives(
+    objectives: list[dict],
+    *,
+    objective_count: int = 8,
+    evidence_quality: str = "moderate",
+):
+    from app.services.ctdt_skills.objective_update_skill import (
+        ObjectiveUpdateSkill,
+    )
+
+    skill = ObjectiveUpdateSkill()
+    pack = _make_context_pack()
+
+    with patch.object(
+        skill,
+        "_call_openai",
+        return_value=_make_structured_llm_response_from_objectives(
+            objectives,
+            evidence_quality=evidence_quality,
+        ),
+    ), patch("app.services.ctdt_skills.objective_update_skill.settings") as ms:
+        ms.SYNTHESIS_ENABLED = True
+        ms.OPENAI_API_KEY = "sk-test"
+        return await skill.run(
+            update_cycle_id="15",
+            context_pack=pack,
+            objective_count=objective_count,
+        )
+
+
+def _make_objective_payload_for_service(
+    *,
+    objective_count: int = 8,
+    objectives: list[dict] | None = None,
+    evidence_quality: str = "moderate",
+) -> ObjectiveUpdatePayload:
+    return ObjectiveUpdatePayload(
+        general_objective="Mục tiêu của chương trình là đào tạo kỹ sư Công nghệ thông tin.",
+        general_objective_text="Mục tiêu của chương trình là đào tạo kỹ sư Công nghệ thông tin.",
+        specific_objectives_structured=objectives or _make_structured_objectives(objective_count),
+        objective_count=objective_count,
+        format_profile="tay_nguyen_ctdt_dynamic_m_objectives",
+        evidence_quality=evidence_quality,
+    )
+
+
+async def _run_service_with_skill_result(
+    skill_result: ObjectiveUpdateResult,
+    *,
+    objective_count: int = 8,
+    save_draft: bool = False,
+    db=None,
+):
+    from app.services.ctdt_objective_update_service import (
+        generate_objective_update_draft,
+    )
+
+    pack = _make_context_pack()
+    db = db or AsyncMock()
+
+    with patch(
+        "app.services.ctdt_objective_update_service.build_objective_update_context_pack",
+        return_value=pack,
+    ), patch(
+        "app.services.ctdt_skills.objective_update_skill.ObjectiveUpdateSkill.run",
+        return_value=skill_result,
+    ):
+        return await generate_objective_update_draft(
+            db,
+            tenant_id="t1",
+            user_id=7,
+            update_cycle_id="15",
+            program_code="7480201",
+            program_name="Công nghệ thông tin",
+            objective_count=objective_count,
+            save_draft=save_draft,
+        )
+
+
 class TestAllocationTable:
     def test_all_counts_4_to_8(self):
         for count in range(4, 9):
@@ -248,6 +355,132 @@ class TestSkillObjectiveCount:
 # ══════════════════════════════════════════════════════════════════════
 # 3. Structured specific_objectives format
 # ══════════════════════════════════════════════════════════════════════
+
+
+class TestStrictObjectiveContract:
+    @pytest.mark.asyncio
+    async def test_objective_count_4_exact_contract_generated(self):
+        result = await _run_skill_with_objectives(
+            _make_structured_objectives(4),
+            objective_count=4,
+        )
+
+        assert result.status == ObjectiveUpdateStatus.GENERATED
+        assert len(result.payload.specific_objectives_structured) == 4
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_exact_contract_generated(self):
+        result = await _run_skill_with_objectives(
+            _make_structured_objectives(8),
+            objective_count=8,
+        )
+
+        assert result.status == ObjectiveUpdateStatus.GENERATED
+        assert len(result.payload.specific_objectives_structured) == 8
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_ai_returns_m1_to_m5_failed(self):
+        result = await _run_skill_with_objectives(
+            _make_structured_objectives(5),
+            objective_count=8,
+        )
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any("5/8" in warning for warning in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_ai_returns_m1_to_m9_failed(self):
+        objectives = _make_structured_objectives(8)
+        objectives.append({
+            "code": "M9",
+            "group": "foreign_language_it",
+            "text": "Mục tiêu M9 sinh dư.",
+        })
+
+        result = await _run_skill_with_objectives(objectives, objective_count=8)
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any("9/8" in warning for warning in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_missing_m4_failed(self):
+        objectives = [
+            obj for obj in _make_structured_objectives(8)
+            if obj["code"] != "M4"
+        ]
+
+        result = await _run_skill_with_objectives(objectives, objective_count=8)
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any("M1 đến M8" in warning for warning in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_duplicate_m3_failed(self):
+        objectives = _make_structured_objectives(8)
+        objectives[3]["code"] = "M3"
+        objectives[3]["group"] = "knowledge"
+
+        result = await _run_skill_with_objectives(objectives, objective_count=8)
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any("trùng" in warning and "M3" in warning for warning in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_objective_count_8_wrong_group_failed(self):
+        objectives = _make_structured_objectives(8)
+        objectives[4]["group"] = "knowledge"
+
+        result = await _run_skill_with_objectives(objectives, objective_count=8)
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any(
+            "M5" in warning and "skills_attitude" in warning
+            for warning in result.warnings
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_objective_text_failed(self):
+        objectives = _make_structured_objectives(8)
+        objectives[2]["text"] = " "
+
+        result = await _run_skill_with_objectives(objectives, objective_count=8)
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any("M3" in warning and "rỗng" in warning for warning in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_missing_structured_specific_objectives_failed(self):
+        from app.services.ctdt_skills.objective_update_skill import (
+            ObjectiveUpdateSkill,
+        )
+
+        skill = ObjectiveUpdateSkill()
+        pack = _make_context_pack()
+        llm_data = {
+            "general_objective_text": "Mục tiêu chung.",
+            "specific_objective_texts": ["Mục tiêu 1", "Mục tiêu 2"],
+            "evidence_quality": "moderate",
+            "warnings": [],
+        }
+
+        with patch.object(
+            skill,
+            "_call_openai",
+            return_value=json.dumps(llm_data),
+        ), patch("app.services.ctdt_skills.objective_update_skill.settings") as ms:
+            ms.SYNTHESIS_ENABLED = True
+            ms.OPENAI_API_KEY = "sk-test"
+            result = await skill.run(
+                update_cycle_id="15",
+                context_pack=pack,
+                objective_count=8,
+            )
+
+        assert result.status == ObjectiveUpdateStatus.FAILED
+        assert any(
+            "cấu trúc mục tiêu bắt buộc M1 đến M8" in warning
+            for warning in result.warnings
+        )
 
 
 class TestStructuredObjectives:
@@ -653,6 +886,151 @@ class TestHarden1ServiceQualityLevel:
 # ══════════════════════════════════════════════════════════════════════
 
 
+class TestStrictObjectiveServiceQuality:
+    @pytest.mark.asyncio
+    async def test_service_needs_generation_has_not_attempted_message(self):
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.NEEDS_GENERATION,
+            payload=ObjectiveUpdatePayload(),
+            warnings=["OPENAI_API_KEY chưa được cấu hình."],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "failed"
+        assert any(
+            "Chưa thể sinh mục tiêu đào tạo" in message
+            for message in result.quality_messages
+        )
+        assert "OPENAI_API_KEY chưa được cấu hình." in result.quality_messages
+        assert not any(
+            "AI trả về 0 mục tiêu" in message
+            for message in result.quality_messages
+        )
+        assert not any(
+            "AI không trả về cấu trúc mục tiêu M1 đến" in message
+            for message in result.quality_messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_service_insufficient_context_has_not_attempted_message(self):
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.INSUFFICIENT_CONTEXT,
+            payload=ObjectiveUpdatePayload(),
+            warnings=["Không có contexts nào trong context pack."],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "failed"
+        assert any(
+            "Chưa đủ dữ liệu đầu vào để sinh mục tiêu đào tạo." in message
+            for message in result.quality_messages
+        )
+        assert "Không có contexts nào trong context pack." in result.quality_messages
+        assert not any(
+            "AI trả về 0 mục tiêu" in message
+            for message in result.quality_messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_service_skill_failed_quality_failed(self):
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.FAILED,
+            payload=_make_objective_payload_for_service(
+                objective_count=8,
+                objectives=_make_structured_objectives(5),
+            ),
+            warnings=["AI chỉ sinh được 5/8 mục tiêu cụ thể hợp lệ."],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "failed"
+        assert any(
+            "AI trả về 5 mục tiêu trong khi yêu cầu là 8" in message
+            for message in result.quality_messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_service_weak_evidence_valid_contract_warning_not_failed(self):
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.GENERATED,
+            payload=_make_objective_payload_for_service(
+                objective_count=8,
+                evidence_quality="weak",
+            ),
+            warnings=[],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "warning"
+        assert any("minh chứng" in message for message in result.quality_messages)
+
+    @pytest.mark.asyncio
+    async def test_service_full_count_wrong_group_uses_structural_message(self):
+        objectives = _make_structured_objectives(8)
+        objectives[4]["group"] = "knowledge"
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.FAILED,
+            payload=_make_objective_payload_for_service(
+                objective_count=8,
+                objectives=objectives,
+            ),
+            warnings=["M5 phải thuộc nhóm skills_attitude nhưng AI trả về knowledge."],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "failed"
+        assert any(
+            "Kết quả AI không đáp ứng cấu trúc mục tiêu bắt buộc" in message
+            for message in result.quality_messages
+        )
+        assert any(
+            "M5" in message and "skills_attitude" in message
+            for message in result.quality_messages
+        )
+        assert not any(
+            "AI trả về 8 mục tiêu trong khi yêu cầu là 8" in message
+            for message in result.quality_messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_service_count_mismatch_backstop_failed(self):
+        skill_result = ObjectiveUpdateResult(
+            status=ObjectiveUpdateStatus.GENERATED,
+            payload=_make_objective_payload_for_service(
+                objective_count=8,
+                objectives=_make_structured_objectives(5),
+            ),
+            warnings=[],
+        )
+
+        result = await _run_service_with_skill_result(
+            skill_result,
+            objective_count=8,
+        )
+
+        assert result.quality_level == "failed"
+
+
 class TestHarden1LatestEndpointMetadata:
     @pytest.mark.asyncio
     async def test_latest_with_flat_has_metadata(self):
@@ -756,4 +1134,3 @@ class TestHarden1OldDraftFallback:
         assert data["general_objective_text"] == data["general_objective"]
         assert isinstance(data["specific_objective_texts"], list)
         assert data["evidence_quality"] == "moderate"
-

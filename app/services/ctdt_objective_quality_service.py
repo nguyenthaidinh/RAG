@@ -250,6 +250,7 @@ def check_objective_quality(
     Kiểm tra chất lượng nhẹ bằng code. Trả list warnings tiếng Việt.
 
     Không chặn response. Chỉ trả warning để UI hiển thị.
+    Count contract do skill/service strict gate xử lý, không cảnh báo mềm ở đây.
     """
     warnings: list[str] = []
 
@@ -260,28 +261,7 @@ def check_objective_quality(
             "Cần kiểm tra tài liệu đầu vào hoặc thử lại."
         )
 
-    # 2. specific_objectives count check (R6.5C: dynamic threshold)
-    num_specific = len(specific_objectives)
-    if num_specific < objective_count and num_specific > 0:
-        warnings.append(
-            f"Chỉ có {num_specific}/{objective_count} mục tiêu cụ thể. "
-            "Cần bổ sung thêm mục tiêu cụ thể."
-        )
-    elif num_specific == 0 and general_objective.strip():
-        warnings.append(
-            "Chưa sinh được mục tiêu cụ thể nào. "
-            "Cần kiểm tra tài liệu đầu vào."
-        )
-
-    # 3. Quá nhiều mục (R6.5C: check against requested count)
-    if num_specific > objective_count:
-        warnings.append(
-            f"Có {num_specific} mục tiêu cụ thể "
-            f"(yêu cầu {objective_count} mục). "
-            "Cần xem xét lược bớt."
-        )
-
-    # 4. Nội dung quá chung chung
+    # 2. Nội dung quá chung chung
     if general_objective.strip():
         generic_count = sum(
             1 for phrase in _GENERIC_PHRASES

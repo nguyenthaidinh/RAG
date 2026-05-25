@@ -218,23 +218,77 @@ async def generate_objective_update_draft(
     )
     all_warnings = adapted.warnings + quality_warnings
 
-    # R6.5C: Compute quality_level
-    quality_level = "good"
+    # R6.9A: Hard generation contract gate, separate from soft warnings.
+    actual_count = len(adapted.specific_objectives or [])
+    structured_payload = payload.get("specific_objectives_structured")
+    has_structured_contract_payload = (
+        isinstance(structured_payload, list) and bool(structured_payload)
+    )
+    has_generation_failure = (
+        generation_status == ObjectiveUpdateStatus.FAILED
+        or actual_count != objective_count
+        or not has_structured_contract_payload
+    )
+    generation_not_attempted = generation_status in (
+        ObjectiveUpdateStatus.NEEDS_GENERATION,
+        ObjectiveUpdateStatus.INSUFFICIENT_CONTEXT,
+    )
+
     quality_messages: list[str] = []
-    if not has_evidence or not has_current:
+
+    def _add_quality_message(message: str) -> None:
+        if message not in quality_messages:
+            quality_messages.append(message)
+
+    if generation_not_attempted:
+        quality_level = "failed"
+        if generation_status == ObjectiveUpdateStatus.NEEDS_GENERATION:
+            _add_quality_message(
+                "Chưa thể sinh mục tiêu đào tạo vì dịch vụ AI chưa sẵn sàng "
+                "hoặc chưa được cấu hình."
+            )
+        else:
+            _add_quality_message(
+                "Chưa đủ dữ liệu đầu vào để sinh mục tiêu đào tạo."
+            )
+        for warning in generation_warnings:
+            _add_quality_message(warning)
+    elif has_generation_failure:
+        quality_level = "failed"
+        if actual_count != objective_count:
+            _add_quality_message(
+                f"AI trả về {actual_count} mục tiêu trong khi yêu cầu là {objective_count}. "
+                "Kết quả chưa đủ điều kiện sử dụng."
+            )
+        else:
+            _add_quality_message(
+                "Kết quả AI không đáp ứng cấu trúc mục tiêu bắt buộc. "
+                "Dữ liệu chưa đủ điều kiện sử dụng."
+            )
+        if not has_structured_contract_payload:
+            _add_quality_message(
+                f"AI không trả về cấu trúc mục tiêu M1 đến M{objective_count}."
+            )
+        for warning in generation_warnings:
+            _add_quality_message(warning)
+    elif not has_evidence or not has_current or quality_warnings:
         quality_level = "warning"
-        quality_messages.append(
+    else:
+        quality_level = "good"
+
+    if not has_generation_failure and (not has_evidence or not has_current):
+        _add_quality_message(
             "Nguồn minh chứng chưa đủ mạnh, nội dung cần được rà soát thủ công."
         )
-    if quality_warnings:
-        quality_level = "warning"
-        quality_messages.extend(quality_warnings)
+    if not has_generation_failure:
+        for warning in quality_warnings:
+            _add_quality_message(warning)
 
-    # R6.5C-HARDEN-1: Check evidence_quality from skill payload
+    # R6.5C-HARDEN-1: weak evidence only downgrades good -> warning, never failed.
     evidence_quality = payload.get("evidence_quality", "moderate")
-    if evidence_quality == "weak" and quality_level != "warning":
+    if evidence_quality == "weak" and quality_level == "good":
         quality_level = "warning"
-    if evidence_quality == "weak":
+    if evidence_quality == "weak" and quality_level != "failed":
         _weak_msg = (
             "Nguồn minh chứng chưa đủ mạnh, "
             "nội dung cần được rà soát thủ công."
@@ -244,7 +298,11 @@ async def generate_objective_update_draft(
             for m in quality_messages
         )
         if not has_similar:
-            quality_messages.append(_weak_msg)
+            _add_quality_message(_weak_msg)
+
+    for message in quality_messages:
+        if message not in all_warnings:
+            all_warnings.append(message)
 
     # R6.5C: Build specific_objective_texts from adapted specific_objectives
     specific_objective_texts: list[str] = []
@@ -274,6 +332,7 @@ async def generate_objective_update_draft(
     # ── Step 5: Optional draft save ──────────────────────────────
     draft_id = None
     draft_saved = False
+    draft_storage_status = "archived" if quality_level == "failed" else "draft"
 
     if save_draft:
         from app.db.models.ctdt_analysis_draft import CTDTAnalysisDraft
@@ -294,6 +353,9 @@ async def generate_objective_update_draft(
                         "warnings": generation_warnings,
                         "objective_count": objective_count,
                         "format_profile": adapted.source_summary.get("format_profile", ""),
+                        "quality_level": quality_level,
+                        "contract_valid": quality_level != "failed",
+                        "draft_storage_status": draft_storage_status,
                     },
                     "_flat": flat_block,
                 },
@@ -305,7 +367,7 @@ async def generate_objective_update_draft(
                 },
                 created_by=user_id,
                 updated_by=user_id,
-                status="draft",
+                status=draft_storage_status,
             )
             db.add(draft)
             await db.flush()
