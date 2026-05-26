@@ -24,6 +24,7 @@ Engine cung cấp:
   GET  /api/v1/ctdt/mapping-draft/schema — Schema contract nháp mapping (R6.3A)
   POST /api/v1/ctdt/update-cycles/mapping-draft/build — Build nháp mapping từ objective/outcome drafts (R6.3B)
   GET  /api/v1/ctdt/update-cycles/{id}/mapping-draft/latest — Lấy nháp mapping mới nhất (R6.3C)
+  POST /api/v1/ctdt/update-cycles/mapping-draft/ai-build   — AI sinh gợi ý liên kết M↔C từ snapshot Laravel (R6.13C1)
 
 ─── Legacy endpoints (backward-compatible) ──────────────────────────
   POST /api/v1/ctdt/query              — Truy vấn thông tin CTĐT (LLM answer)
@@ -2887,3 +2888,145 @@ async def get_latest_mapping_draft(
         created_at=str(draft.created_at) if draft.created_at else None,
         updated_at=str(draft.updated_at) if draft.updated_at else None,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# R6.13C1: AI Mapping Suggestion (snapshot + scoped retrieval + LLM)
+# ──────────────────────────────────────────────────────────────────────────────
+
+from app.schemas.ctdt_mapping_ai import (
+    MappingAIBuildRequest,
+    MappingAIBuildResponse,
+    MappingAIEntry,
+    MappingAICoverage,
+    MappingAISourceSummary,
+)
+
+
+@router.post(
+    "/update-cycles/mapping-draft/ai-build",
+    response_model=MappingAIBuildResponse,
+)
+async def mapping_draft_ai_build(
+    body: MappingAIBuildRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    query_svc=Depends(_get_query_svc),
+):
+    """
+    R6.13C1 — AI sinh gợi ý liên kết Mục tiêu đào tạo ↔ Chuẩn đầu ra.
+
+    Nhận snapshot hoàn thành từ Laravel → scoped retrieval → LLM →
+    trả danh sách liên kết đề xuất cho Laravel hiển thị ô X.
+
+    - Gọi LLM thật (OpenAI).
+    - Retrieval scoped theo update_cycle_id, task_type=MATRIX_MAPPING.
+    - Không persist mapping draft vào DB RAG.
+    - Không đọc draft cũ DB RAG làm nguồn.
+    - Không sửa nội dung M/C snapshot.
+    """
+    from app.services.ctdt_mapping_ai_service import generate_mapping_ai
+
+    # Validate request body via Pydantic (already done by FastAPI)
+    # Additional analysis_mode check for consistency with other endpoints
+    if body.analysis_mode != "design":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "mapping_ai_requires_design_mode",
+                "message": "AI mapping chỉ hỗ trợ analysis_mode='design'.",
+                "retryable": False,
+            },
+        )
+
+    # Build objectives/outcomes dicts from snapshot
+    objectives = [
+        {"code": obj.code.strip(), "text": obj.text.strip()}
+        for obj in body.approved_objective_snapshot.specific_objectives
+    ]
+    outcomes = [
+        {
+            "code": out.code.strip(),
+            "group": out.group.strip(),
+            "text": out.text.strip(),
+        }
+        for out in body.approved_outcome_snapshot.outcomes
+    ]
+
+    # Extract general_objective for LLM context
+    general_objective = (
+        body.approved_objective_snapshot.general_objective or ""
+    ).strip() or None
+
+    try:
+        result = await generate_mapping_ai(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            update_cycle_id=body.update_cycle_id,
+            program_id=body.program_id,
+            program_code=body.program_code,
+            program_name=body.program_name,
+            analysis_mode=body.analysis_mode,
+            general_objective=general_objective,
+            objectives=objectives,
+            outcomes=outcomes,
+            top_k=body.top_k,
+            user_instruction=body.user_instruction,
+            query_svc=query_svc,
+        )
+    except Exception as exc:
+        logger.error(
+            "ctdt.mapping_ai_build_failed tenant_id=%s update_cycle=%s: %s",
+            user.tenant_id, body.update_cycle_id, exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "mapping_ai_build_error",
+                "message": "Lỗi sinh gợi ý liên kết Mục tiêu ↔ Chuẩn đầu ra.",
+                "retryable": True,
+            },
+        )
+
+    return MappingAIBuildResponse(
+        status=result.status,
+        source="laravel_approved_snapshot",
+        update_cycle_id=result.update_cycle_id,
+        program_id=result.program_id,
+        program_code=result.program_code,
+        program_name=result.program_name,
+        analysis_mode=result.analysis_mode,
+        mappings=[
+            MappingAIEntry(
+                objective_code=m.objective_code,
+                outcome_code=m.outcome_code,
+                reason=m.reason,
+                confidence=m.confidence,
+            )
+            for m in result.mappings
+        ],
+        coverage=MappingAICoverage(
+            objective_codes=result.coverage.objective_codes,
+            outcome_codes=result.coverage.outcome_codes,
+            mapped_objective_codes=result.coverage.mapped_objective_codes,
+            mapped_outcome_codes=result.coverage.mapped_outcome_codes,
+            unmapped_objective_codes=result.coverage.unmapped_objective_codes,
+            unmapped_outcome_codes=result.coverage.unmapped_outcome_codes,
+            mapping_count=result.coverage.mapping_count,
+        ),
+        quality_level=result.quality_level,
+        quality_messages=result.quality_messages,
+        retrieval_used=result.retrieval_used,
+        source_summary=MappingAISourceSummary(
+            task_type=result.source_summary.task_type,
+            retrieved_chunk_count=result.source_summary.retrieved_chunk_count,
+            used_chunk_count=result.source_summary.used_chunk_count,
+            document_roles=result.source_summary.document_roles,
+            latency_ms=result.source_summary.latency_ms,
+        ),
+        warnings=result.warnings,
+    )
+
